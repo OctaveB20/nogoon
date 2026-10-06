@@ -214,6 +214,18 @@ def add_member(pid):
     st.session_state.new_member = ""
 
 
+def set_project_due(pid):
+    get_project(pid)["due"] = st.session_state[f"pdue_{pid}"].isoformat()
+    save()
+
+
+def set_task_due(pid, tid):
+    for t in get_project(pid)["tasks"]:
+        if t["id"] == tid:
+            t["due"] = st.session_state[f"due_{tid}"].isoformat()
+    save()
+
+
 # ---------- Dialogues ----------
 @st.dialog("Nouveau projet")
 def new_project():
@@ -259,6 +271,18 @@ def new_task(pid):
             {"id": uid(), "title": title.strip(), "due": due.isoformat(), "owner": owner, "done": False, "by": ""}
         )
         save()
+        st.rerun()
+
+
+@st.dialog("Supprimer ce projet ?")
+def confirm_delete(pid):
+    p = get_project(pid)
+    st.write(f"« {p['name']} » et ses {len(p['tasks'])} tâche(s) seront supprimés. Cette action est définitive.")
+    c1, c2 = st.columns(2)
+    if c1.button("Annuler", use_container_width=True):
+        st.rerun()
+    if c2.button("Oui, supprimer", type="primary", use_container_width=True):
+        delete_project(pid)
         st.rerun()
 
 
@@ -325,16 +349,21 @@ def project_view(p):
             unsafe_allow_html=True,
         )
 
-    c1, c2, c3 = st.columns([1.2, 1.2, 2], vertical_alignment="center")
+    c1, c2, c3, c4 = st.columns([1.2, 1.2, 1, 2], vertical_alignment="center")
     if c1.button("+  Nouvelle tâche", type="primary", key="add_task", use_container_width=True):
         new_task(p["id"])
     with c2.popover("Gérer le projet", use_container_width=True):
         st.text_input("Ajouter un membre", key="new_member", placeholder="Prénom")
         st.button("Ajouter", key="add_member", on_click=add_member, args=(p["id"],))
-        st.button("Supprimer ce projet", key="del_project", on_click=delete_project, args=(p["id"],))
+        st.date_input(
+            "Deadline du projet", value=parse(p["due"]), format="DD/MM/YYYY",
+            key=f"pdue_{p['id']}", on_change=set_project_due, args=(p["id"],),
+        )
+    if c3.button("Supprimer", key="del_project", use_container_width=True):
+        confirm_delete(p["id"])
 
     if p["members"]:
-        c3.selectbox(
+        c4.selectbox(
             "Je suis", p["members"], index=None, placeholder="Je suis… (choisis ton prénom)",
             key=f"who_{p['id']}", label_visibility="collapsed",
         )
@@ -352,7 +381,7 @@ def project_view(p):
         )
     for t in tasks:
         with st.container(key=f"task_{t['id']}"):
-            c = st.columns([0.07, 1, 0.35, 0.42, 0.08], vertical_alignment="center")
+            c = st.columns([0.07, 1, 0.35, 0.42, 0.1, 0.1], vertical_alignment="center")
             c[0].checkbox(
                 "fait", value=t["done"], key=f"chk_{t['id']}", on_change=toggle,
                 args=(p["id"], t["id"]), label_visibility="collapsed", disabled=locked,
@@ -365,7 +394,12 @@ def project_view(p):
                 f'{due_badge(t["due"], t["done"])}<span class="date-small">{parse(t["due"]):%d/%m}</span>',
                 unsafe_allow_html=True,
             )
-            c[4].button("✕", key=f"rm_{t['id']}", on_click=delete_task, args=(p["id"], t["id"]))
+            with c[4].popover("✎"):
+                st.date_input(
+                    "Deadline", value=parse(t["due"]), format="DD/MM/YYYY",
+                    key=f"due_{t['id']}", on_change=set_task_due, args=(p["id"], t["id"]),
+                )
+            c[5].button("✕", key=f"rm_{t['id']}", on_click=delete_task, args=(p["id"], t["id"]))
 
 
 def ring(p, active):
