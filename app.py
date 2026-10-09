@@ -4,6 +4,7 @@ import uuid
 from datetime import date, timedelta
 from pathlib import Path
 
+import requests
 import streamlit as st
 
 st.set_page_config(page_title="anti gooner", page_icon="🎯", layout="wide", initial_sidebar_state="expanded")
@@ -122,7 +123,26 @@ CSS = """
 
 
 # ---------- Données ----------
+def _supabase():
+    """URL et clé lues dans les Secrets Streamlit ; None si absents (mode local)."""
+    try:
+        return st.secrets["SUPABASE_URL"].rstrip("/"), st.secrets["SUPABASE_KEY"]
+    except Exception:
+        return None
+
+
 def load():
+    cfg = _supabase()
+    if cfg:
+        url, key = cfg
+        r = requests.get(
+            f"{url}/rest/v1/app_state?id=eq.1&select=data",
+            headers={"apikey": key},
+            timeout=10,
+        )
+        r.raise_for_status()  # en cas d'échec on s'arrête : on n'écrase jamais la base
+        rows = r.json()
+        return rows[0]["data"] if rows else []
     if DATA_FILE.exists():
         try:
             return json.loads(DATA_FILE.read_text("utf-8"))
@@ -132,14 +152,36 @@ def load():
 
 
 def save():
+    cfg = _supabase()
+    if cfg:
+        url, key = cfg
+        try:
+            r = requests.patch(
+                f"{url}/rest/v1/app_state?id=eq.1",
+                headers={"apikey": key, "Content-Type": "application/json", "Prefer": "return=minimal"},
+                json={"data": st.session_state.projects},
+                timeout=10,
+            )
+            r.raise_for_status()
+        except Exception:
+            st.toast("Sauvegarde impossible, réessaie dans un instant.", icon="⚠️")
+        return
     DATA_FILE.write_text(
         json.dumps(st.session_state.projects, ensure_ascii=False, indent=2), "utf-8"
     )
 
 
-if "projects" not in st.session_state:
-    st.session_state.projects = load()
+if "open" not in st.session_state:
     st.session_state.open = None
+try:
+    # Rechargé à chaque action : chacun voit les changements des autres
+    st.session_state.projects = load()
+except Exception:
+    st.error(
+        "Impossible de joindre la base de données (projet Supabase en pause, "
+        "ou URL / clé incorrectes). Tes données ne sont pas perdues."
+    )
+    st.stop()
 
 
 def uid():
@@ -432,6 +474,18 @@ def sidebar():
             st.caption("L'avancement de chaque projet apparaîtra ici.")
         for p in projects:
             st.markdown(ring(p, p["id"] == st.session_state.open), unsafe_allow_html=True)
+        st.markdown(
+            '<div class="side-title" style="font-size:1.05rem;margin-top:1.8rem">Sauvegarde</div>',
+            unsafe_allow_html=True,
+        )
+        st.download_button(
+            "Exporter les données",
+            data=json.dumps(st.session_state.projects, ensure_ascii=False, indent=2),
+            file_name=f"anti_gooner_{date.today():%Y-%m-%d}.json",
+            mime="application/json",
+            on_click="ignore",
+            use_container_width=True,
+        )
 
 
 # ---------- Main ----------
