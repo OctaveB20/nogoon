@@ -13,6 +13,68 @@ st.set_page_config(page_title="anti gooner", page_icon="🎯", layout="wide", in
 DATA_FILE = Path(__file__).with_name("anti_gooner_data.json")
 COLORS = ["#8B7BFF", "#FF8FA3", "#5CE1C6", "#FFC46B", "#6BB6FF", "#C48BFF"]
 
+LANG = st.session_state.get("lang", "FR")
+
+EN = {
+    "Les deadlines de l'équipe, au même endroit.": "Your team's deadlines, all in one place.",
+    "projet": "project", "projets": "projects",
+    "tâche à faire": "task to do", "tâches à faire": "tasks to do",
+    "Connecte-toi pour retrouver tes projets.": "Log in to find your projects.",
+    "Connexion": "Log in", "Créer un compte": "Sign up", "Mot de passe": "Password",
+    "Se connecter": "Log in", "Email ou mot de passe incorrect.": "Wrong email or password.",
+    "Ton prénom (visible par tes amis)": "Your first name (visible to your friends)",
+    "Mot de passe (6 caractères minimum)": "Password (6 characters minimum)",
+    "Code d'invitation": "Invitation code", "Créer mon compte": "Create my account",
+    "Inscriptions fermées (INVITE_CODE absent des Secrets).": "Sign-ups are closed (INVITE_CODE missing from Secrets).",
+    "Code d'invitation incorrect.": "Wrong invitation code.",
+    "Vérifie le nom, l'email et le mot de passe (6 caractères minimum).": "Check the name, email and password (6 characters minimum).",
+    "Ce nom est déjà pris.": "This name is already taken.",
+    "Création impossible (cet email est peut-être déjà utilisé).": "Could not create the account (this email may already be in use).",
+    "Sauvegarde impossible, réessaie dans un instant.": "Could not save, try again in a moment.",
+    "Suppression impossible, réessaie dans un instant.": "Could not delete, try again in a moment.",
+    "Impossible de joindre la base de données (projet Supabase en pause, ou URL / clé incorrectes). Tes données ne sont pas perdues.": "Cannot reach the database (Supabase project paused, or wrong URL / key). Your data is not lost.",
+    "terminé": "done", "aujourd'hui": "today", "demain": "tomorrow",
+    "en retard de {n} j": "{n} d overdue", "dans {n} j": "in {n} d",
+    "{done}/{total} tâches": "{done}/{total} tasks",
+    "{done}/{total} tâches faites": "{done}/{total} tasks done",
+    "{done}/{total} tâches, deadline le {d}": "{done}/{total} tasks, deadline {d}",
+    "Ouvrir": "Open", "+  Nouveau projet": "+  New project",
+    "Aucun projet pour l'instant. Clique sur le + pour créer le premier.": "No projects yet. Click the + to create the first one.",
+    "Mes tâches": "My tasks", "←  Retour au board": "←  Back to board",
+    "+  Nouvelle tâche": "+  New task", "Gérer le projet": "Manage project",
+    "Ajouter un membre": "Add a member", "Choisis un ami inscrit": "Pick a registered friend",
+    "Ajouter": "Add", "Deadline du projet": "Project deadline", "Supprimer": "Delete",
+    "Pas encore de tâche. Ajoute la première avec sa deadline.": "No tasks yet. Add the first one with its deadline.",
+    "fait": "done", "fait par": "done by", "Tout le monde": "Everyone",
+    "Nouveau projet": "New project", "Nom du projet": "Project name",
+    "Ex. Étude de cas marketing": "E.g. Marketing case study",
+    "Description (facultatif)": "Description (optional)",
+    "Qui est dans l'équipe ?": "Who's on the team?",
+    "Ajoute des amis inscrits": "Add registered friends",
+    "Créer le projet": "Create project", "Donne un nom au projet.": "Give the project a name.",
+    "Nouvelle tâche": "New task", "Tâche": "Task",
+    "Ex. Rédiger l'introduction": "E.g. Write the introduction",
+    "Responsable": "Owner", "Ajouter la tâche": "Add task",
+    "Donne un nom à la tâche.": "Give the task a name.",
+    "Supprimer ce projet ?": "Delete this project?",
+    "« {name} » et ses {n} tâche(s) seront supprimés. Cette action est définitive.": "\"{name}\" and its {n} task(s) will be deleted. This cannot be undone.",
+    "Annuler": "Cancel", "Oui, supprimer": "Yes, delete",
+    "Avancement": "Progress",
+    "L'avancement de chaque projet apparaîtra ici.": "Each project's progress will show up here.",
+    "Sauvegarde": "Backup", "Exporter les données": "Export data",
+    "Connecté : {name}": "Logged in: {name}", "Se déconnecter": "Log out",
+}
+
+
+def tr(s):
+    return EN.get(s, s) if LANG == "EN" else s
+
+
+def pl(n, one, many):
+    single = n == 1 or (n == 0 and LANG != "EN")
+    return f"{n} {tr(one if single else many)}"
+
+
 CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Manrope:wght@400;500;600;700&display=swap');
@@ -121,6 +183,14 @@ CSS = """
 .by { color: var(--muted); font-size: .76rem; margin-top: .1rem; }
 .mt-row { display: flex; align-items: center; gap: .8rem; padding: .7rem 1rem; margin-bottom: .5rem; border-radius: 14px; background: rgba(255,255,255,.04); border: 1px solid var(--line); }
 .mt-row .t-title { flex: 1; }
+
+/* Sélecteur de langue */
+.st-key-lang [role="radiogroup"] { gap: .35rem; justify-content: flex-end; }
+.st-key-lang label { background: rgba(255,255,255,.05); border: 1px solid var(--line); border-radius: 999px; padding: .15rem .85rem; transition: all .25s ease; cursor: pointer; }
+.st-key-lang label:hover { border-color: rgba(139,123,255,.5); }
+.st-key-lang label:has(input:checked) { background: rgba(139,123,255,.24); border-color: rgba(139,123,255,.65); }
+.st-key-lang label > div:first-child { display: none; }
+.stApp label p, .stApp [data-baseweb="tab"] p, .stApp [data-testid="stCaptionContainer"] { color: #ECEBFF !important; }
 </style>
 """
 
@@ -174,27 +244,27 @@ def save():
         if rows:
             rest("POST", "projects", json=rows, headers={"Prefer": "resolution=merge-duplicates,return=minimal"})
     except Exception:
-        st.toast("Sauvegarde impossible, réessaie dans un instant.", icon="⚠️")
+        st.toast(tr("Sauvegarde impossible, réessaie dans un instant."), icon="⚠️")
 
 
 # ---------- Comptes ----------
 def sign_up(name, email, pwd, code):
     invite = str(st.secrets.get("INVITE_CODE", ""))
     if not invite:
-        return "Inscriptions fermées (INVITE_CODE absent des Secrets)."
+        return tr("Inscriptions fermées (INVITE_CODE absent des Secrets).")
     if not hmac.compare_digest(code.strip().encode(), invite.encode()):
-        return "Code d'invitation incorrect."
+        return tr("Code d'invitation incorrect.")
     name = name.strip()
     if len(name) < 2 or len(pwd) < 6 or "@" not in email:
-        return "Vérifie le nom, l'email et le mot de passe (6 caractères minimum)."
+        return tr("Vérifie le nom, l'email et le mot de passe (6 caractères minimum).")
     if any(x["name"].lower() == name.lower() for x in profiles()):
-        return "Ce nom est déjà pris."
+        return tr("Ce nom est déjà pris.")
     r = requests.post(
         f"{URL}/auth/v1/admin/users", headers=H, timeout=10,
         json={"email": email.strip(), "password": pwd, "email_confirm": True, "user_metadata": {"name": name}},
     )
     if r.status_code >= 400:
-        return "Création impossible (cet email est peut-être déjà utilisé)."
+        return tr("Création impossible (cet email est peut-être déjà utilisé).")
     rest("POST", "profiles", json={"id": r.json()["id"], "name": name}, headers={"Prefer": "return=minimal"})
     return None
 
@@ -245,27 +315,27 @@ def auth_gate():
     box = st.empty()
     with box.container():
         st.markdown(
-            '<div class="banner"><h1>anti gooner</h1><p>Connecte-toi pour retrouver tes projets.</p></div>',
+            '<div class="banner"><h1>anti gooner</h1><p>' + tr("Connecte-toi pour retrouver tes projets.") + '</p></div>',
             unsafe_allow_html=True,
         )
-        t1, t2 = st.tabs(["Connexion", "Créer un compte"])
+        t1, t2 = st.tabs([tr("Connexion"), tr("Créer un compte")])
         with t1:
             email = st.text_input("Email", key="li_email")
-            pwd = st.text_input("Mot de passe", type="password", key="li_pwd")
-            if st.button("Se connecter", type="primary", key="li_btn"):
+            pwd = st.text_input(tr("Mot de passe"), type="password", key="li_pwd")
+            if st.button(tr("Se connecter"), type="primary", key="li_btn"):
                 s = _token("password", {"email": email.strip(), "password": pwd})
                 if s:
                     start_session(s)
                     st.session_state.logged_out = False
                     fresh = s["refresh_token"]
                 else:
-                    st.error("Email ou mot de passe incorrect.")
+                    st.error(tr("Email ou mot de passe incorrect."))
         with t2:
-            name = st.text_input("Ton prénom (visible par tes amis)", key="su_name")
+            name = st.text_input(tr("Ton prénom (visible par tes amis)"), key="su_name")
             email2 = st.text_input("Email", key="su_email")
-            pwd2 = st.text_input("Mot de passe (6 caractères minimum)", type="password", key="su_pwd")
-            code = st.text_input("Code d'invitation", type="password", key="su_code")
-            if st.button("Créer mon compte", type="primary", key="su_btn"):
+            pwd2 = st.text_input(tr("Mot de passe (6 caractères minimum)"), type="password", key="su_pwd")
+            code = st.text_input(tr("Code d'invitation"), type="password", key="su_code")
+            if st.button(tr("Créer mon compte"), type="primary", key="su_btn"):
                 err = sign_up(name, email2, pwd2, code)
                 if err:
                     st.error(err)
@@ -307,16 +377,16 @@ def progress(p):
 
 def due_badge(d, done=False):
     if done:
-        return '<span class="badge done">terminé</span>'
+        return f'<span class="badge done">{tr("terminé")}</span>'
     n = (parse(d) - date.today()).days
     if n < 0:
-        txt, cls = f"en retard de {-n} j", "late"
+        txt, cls = tr("en retard de {n} j").format(n=-n), "late"
     elif n == 0:
-        txt, cls = "aujourd'hui", "soon"
+        txt, cls = tr("aujourd'hui"), "soon"
     elif n == 1:
-        txt, cls = "demain", "soon"
+        txt, cls = tr("demain"), "soon"
     else:
-        txt, cls = f"dans {n} j", ("soon" if n <= 3 else "ok")
+        txt, cls = tr("dans {n} j").format(n=n), ("soon" if n <= 3 else "ok")
     return f'<span class="badge {cls}">{txt}</span>'
 
 
@@ -344,7 +414,7 @@ def delete_project(pid):
     try:
         rest("DELETE", "projects", params={"id": f"eq.{pid}"})
     except Exception:
-        st.toast("Suppression impossible, réessaie dans un instant.", icon="⚠️")
+        st.toast(tr("Suppression impossible, réessaie dans un instant."), icon="⚠️")
         return
     st.session_state.projects = [p for p in st.session_state.projects if p["id"] != pid]
     st.session_state.open = None
@@ -374,20 +444,20 @@ def set_task_due(pid, tid):
 
 
 # ---------- Dialogues ----------
-@st.dialog("Nouveau projet")
+@st.dialog(tr("Nouveau projet"))
 def new_project():
-    name = st.text_input("Nom du projet", placeholder="Ex. Étude de cas marketing")
-    desc = st.text_area("Description (facultatif)", height=80)
+    name = st.text_input(tr("Nom du projet"), placeholder=tr("Ex. Étude de cas marketing"))
+    desc = st.text_area(tr("Description (facultatif)"), height=80)
     due = st.date_input(
-        "Deadline du projet", value=date.today() + timedelta(days=14), format="DD/MM/YYYY"
+        tr("Deadline du projet"), value=date.today() + timedelta(days=14), format="DD/MM/YYYY"
     )
     others = [x for x in profiles() if x["id"] != me()["id"]]
     chosen = st.multiselect(
-        "Qui est dans l'équipe ?", [x["name"] for x in others], placeholder="Ajoute des amis inscrits"
+        tr("Qui est dans l'équipe ?"), [x["name"] for x in others], placeholder=tr("Ajoute des amis inscrits")
     )
-    if st.button("Créer le projet", type="primary", use_container_width=True):
+    if st.button(tr("Créer le projet"), type="primary", use_container_width=True):
         if not name.strip():
-            st.error("Donne un nom au projet.")
+            st.error(tr("Donne un nom au projet."))
             return
         st.session_state.projects.append(
             {
@@ -406,18 +476,18 @@ def new_project():
         st.rerun()
 
 
-@st.dialog("Nouvelle tâche")
+@st.dialog(tr("Nouvelle tâche"))
 def new_task(pid):
     p = get_project(pid)
-    title = st.text_input("Tâche", placeholder="Ex. Rédiger l'introduction")
+    title = st.text_input(tr("Tâche"), placeholder=tr("Ex. Rédiger l'introduction"))
     c1, c2 = st.columns(2)
     due = c1.date_input(
         "Deadline", value=date.today() + timedelta(days=3), format="DD/MM/YYYY"
     )
-    owner = c2.selectbox("Responsable", ["Tout le monde"] + p["members"])
-    if st.button("Ajouter la tâche", type="primary", use_container_width=True):
+    owner = c2.selectbox(tr("Responsable"), ["Tout le monde"] + p["members"], format_func=tr)
+    if st.button(tr("Ajouter la tâche"), type="primary", use_container_width=True):
         if not title.strip():
-            st.error("Donne un nom à la tâche.")
+            st.error(tr("Donne un nom à la tâche."))
             return
         p["tasks"].append(
             {"id": uid(), "title": title.strip(), "due": due.isoformat(), "owner": owner, "done": False, "by": ""}
@@ -426,14 +496,14 @@ def new_task(pid):
         st.rerun()
 
 
-@st.dialog("Supprimer ce projet ?")
+@st.dialog(tr("Supprimer ce projet ?"))
 def confirm_delete(pid):
     p = get_project(pid)
-    st.write(f"« {p['name']} » et ses {len(p['tasks'])} tâche(s) seront supprimés. Cette action est définitive.")
+    st.write(tr("« {name} » et ses {n} tâche(s) seront supprimés. Cette action est définitive.").format(name=p["name"], n=len(p["tasks"])))
     c1, c2 = st.columns(2)
-    if c1.button("Annuler", use_container_width=True):
+    if c1.button(tr("Annuler"), use_container_width=True):
         st.rerun()
-    if c2.button("Oui, supprimer", type="primary", use_container_width=True):
+    if c2.button(tr("Oui, supprimer"), type="primary", use_container_width=True):
         delete_project(pid)
         st.rerun()
 
@@ -444,9 +514,9 @@ def banner():
     n_open = sum(1 for p in projects for t in p["tasks"] if not t["done"])
     st.markdown(
         f"""<div class="banner"><h1>anti gooner</h1>
-<p>Les deadlines de l'équipe, au même endroit.</p>
-<span class="pill">{len(projects)} projet{'s' if len(projects) > 1 else ''}</span>
-<span class="pill">{n_open} tâche{'s' if n_open > 1 else ''} à faire</span></div>""",
+<p>{tr("Les deadlines de l'équipe, au même endroit.")}</p>
+<span class="pill">{pl(len(projects), "projet", "projets")}</span>
+<span class="pill">{pl(n_open, "tâche à faire", "tâches à faire")}</span></div>""",
         unsafe_allow_html=True,
     )
 
@@ -454,16 +524,17 @@ def banner():
 def card(p):
     done, total = progress(p)
     pct = int(done / total * 100) if total else 0
+    cnt = tr("{done}/{total} tâches").format(done=done, total=total)
     with st.container(key=f"card_{p['id']}"):
         st.markdown(
             f"""<div class="pc-name"><span class="dot" style="background:{p['color']};color:{p['color']}"></span>{esc(p['name'])}</div>
 <div class="pc-desc">{esc(p['desc']) or '&nbsp;'}</div>
 <div class="pc-bar"><div style="width:{pct}%;background:{p['color']}"></div></div>
-<div class="pc-meta"><span>{done}/{total} tâches</span>{due_badge(p['due'], total > 0 and done == total)}</div>""",
+<div class="pc-meta"><span>{cnt}</span>{due_badge(p['due'], total > 0 and done == total)}</div>""",
             unsafe_allow_html=True,
         )
         st.button(
-            "Ouvrir", key=f"open_{p['id']}", on_click=set_open, args=(p["id"],), use_container_width=True
+            tr("Ouvrir"), key=f"open_{p['id']}", on_click=set_open, args=(p["id"],), use_container_width=True
         )
 
 
@@ -475,13 +546,13 @@ def board():
         for col, item in zip(cols, items[r : r + 3]):
             with col:
                 if item == "add":
-                    if st.button("+  Nouveau projet", key="add_tile", use_container_width=True):
+                    if st.button(tr("+  Nouveau projet"), key="add_tile", use_container_width=True):
                         new_project()
                 else:
                     card(item)
     if not projects:
         st.markdown(
-            '<div class="empty">Aucun projet pour l\'instant. Clique sur le + pour créer le premier.</div>',
+            '<div class="empty">' + tr("Aucun projet pour l'instant. Clique sur le + pour créer le premier.") + "</div>",
             unsafe_allow_html=True,
         )
     mine = sorted(
@@ -490,7 +561,7 @@ def board():
     )
     if mine:
         st.markdown(
-            '<div class="side-title" style="margin-top:2.2rem">Mes tâches</div>', unsafe_allow_html=True
+            '<div class="side-title" style="margin-top:2.2rem">' + tr("Mes tâches") + "</div>", unsafe_allow_html=True
         )
         for p, t in mine:
             st.markdown(
@@ -502,34 +573,35 @@ def board():
 
 
 def project_view(p):
-    st.button("←  Retour au board", key="back", on_click=set_open, args=(None,))
+    st.button(tr("←  Retour au board"), key="back", on_click=set_open, args=(None,))
     done, total = progress(p)
     pct = int(done / total * 100) if total else 0
     chips = "".join(f'<span class="chip">{esc(m)}</span>' for m in p["members"])
+    meta = tr("{done}/{total} tâches, deadline le {d}").format(done=done, total=total, d=f"{parse(p['due']):%d/%m/%Y}")
     with st.container(key="ph"):
         st.markdown(
             f"""<div class="ph-title"><span class="dot" style="background:{p['color']};color:{p['color']}"></span>{esc(p['name'])}</div>
 <div class="ph-desc">{esc(p['desc'])}</div>
 <div class="pc-bar"><div style="width:{pct}%;background:{p['color']}"></div></div>
-<div class="pc-meta"><span>{done}/{total} tâches, deadline le {parse(p['due']):%d/%m/%Y}</span>{due_badge(p['due'], total > 0 and done == total)}</div>
+<div class="pc-meta"><span>{meta}</span>{due_badge(p['due'], total > 0 and done == total)}</div>
 {chips}""",
             unsafe_allow_html=True,
         )
 
     c1, c2, c3, c4 = st.columns([1.2, 1.2, 1, 2], vertical_alignment="center")
-    if c1.button("+  Nouvelle tâche", type="primary", key="add_task", use_container_width=True):
+    if c1.button(tr("+  Nouvelle tâche"), type="primary", key="add_task", use_container_width=True):
         new_task(p["id"])
-    with c2.popover("Gérer le projet", use_container_width=True):
+    with c2.popover(tr("Gérer le projet"), use_container_width=True):
         avail = [x["name"] for x in profiles() if x["id"] not in p["member_ids"]]
         st.selectbox(
-            "Ajouter un membre", avail, index=None, key="new_member", placeholder="Choisis un ami inscrit"
+            tr("Ajouter un membre"), avail, index=None, key="new_member", placeholder=tr("Choisis un ami inscrit")
         )
-        st.button("Ajouter", key="add_member", on_click=add_member, args=(p["id"],))
+        st.button(tr("Ajouter"), key="add_member", on_click=add_member, args=(p["id"],))
         st.date_input(
-            "Deadline du projet", value=parse(p["due"]), format="DD/MM/YYYY",
+            tr("Deadline du projet"), value=parse(p["due"]), format="DD/MM/YYYY",
             key=f"pdue_{p['id']}", on_change=set_project_due, args=(p["id"],),
         )
-    if p.get("owner_id") == me()["id"] and c3.button("Supprimer", key="del_project", use_container_width=True):
+    if p.get("owner_id") == me()["id"] and c3.button(tr("Supprimer"), key="del_project", use_container_width=True):
         confirm_delete(p["id"])
 
     locked = False
@@ -538,20 +610,20 @@ def project_view(p):
     tasks = sorted(p["tasks"], key=lambda t: (t["done"], t["due"]))
     if not tasks:
         st.markdown(
-            '<div class="empty">Pas encore de tâche. Ajoute la première avec sa deadline.</div>',
+            '<div class="empty">' + tr("Pas encore de tâche. Ajoute la première avec sa deadline.") + "</div>",
             unsafe_allow_html=True,
         )
     for t in tasks:
         with st.container(key=f"task_{t['id']}"):
             c = st.columns([0.07, 1, 0.35, 0.42, 0.1, 0.1], vertical_alignment="center")
             c[0].checkbox(
-                "fait", value=t["done"], key=f"chk_{t['id']}", on_change=toggle,
+                tr("fait"), value=t["done"], key=f"chk_{t['id']}", on_change=toggle,
                 args=(p["id"], t["id"]), label_visibility="collapsed", disabled=locked,
             )
             cls = "t-title done" if t["done"] else "t-title"
-            by = f'<div class="by">fait par {esc(t["by"])}</div>' if t["done"] and t.get("by") else ""
+            by = f'<div class="by">{tr("fait par")} {esc(t["by"])}</div>' if t["done"] and t.get("by") else ""
             c[1].markdown(f'<div class="{cls}">{esc(t["title"])}</div>{by}', unsafe_allow_html=True)
-            c[2].markdown(f'<span class="owner">{esc(t["owner"])}</span>', unsafe_allow_html=True)
+            c[2].markdown(f'<span class="owner">{esc(tr(t["owner"]))}</span>', unsafe_allow_html=True)
             c[3].markdown(
                 f'{due_badge(t["due"], t["done"])}<span class="date-small">{parse(t["due"]):%d/%m}</span>',
                 unsafe_allow_html=True,
@@ -567,6 +639,7 @@ def project_view(p):
 def ring(p, active):
     done, total = progress(p)
     pct = round(done / total * 100) if total else 0
+    sub = tr("{done}/{total} tâches faites").format(done=done, total=total)
     fg = (
         f'<circle class="ring-fg" cx="18" cy="18" r="15.9155" fill="none" stroke="{p["color"]}" '
         f'stroke-width="3.4" stroke-linecap="round" stroke-dasharray="{pct} {100 - pct}" '
@@ -582,36 +655,39 @@ def ring(p, active):
         f'<text x="18" y="20.6" text-anchor="middle" font-size="8" font-weight="700" fill="#ECEBFF">{pct}%</text>'
         f'</svg>'
         f'<div><div class="ring-name">{esc(p["name"])}</div>'
-        f'<div class="ring-sub">{done}/{total} tâches faites</div></div></div>'
+        f'<div class="ring-sub">{sub}</div></div></div>'
     )
 
 
 def sidebar():
     with st.sidebar:
-        st.markdown('<div class="side-title">Avancement</div>', unsafe_allow_html=True)
+        st.markdown('<div class="side-title">' + tr("Avancement") + "</div>", unsafe_allow_html=True)
         projects = sorted(st.session_state.projects, key=lambda p: p["due"])
         if not projects:
-            st.caption("L'avancement de chaque projet apparaîtra ici.")
+            st.caption(tr("L'avancement de chaque projet apparaîtra ici."))
         for p in projects:
             st.markdown(ring(p, p["id"] == st.session_state.open), unsafe_allow_html=True)
         st.markdown(
-            '<div class="side-title" style="font-size:1.05rem;margin-top:1.8rem">Sauvegarde</div>',
+            '<div class="side-title" style="font-size:1.05rem;margin-top:1.8rem">' + tr("Sauvegarde") + "</div>",
             unsafe_allow_html=True,
         )
         st.download_button(
-            "Exporter les données",
+            tr("Exporter les données"),
             data=json.dumps(st.session_state.projects, ensure_ascii=False, indent=2),
             file_name=f"anti_gooner_{date.today():%Y-%m-%d}.json",
             mime="application/json",
             on_click="ignore",
             use_container_width=True,
         )
-        st.caption(f"Connecté : {me()['name']}")
-        st.button("Se déconnecter", key="logout", on_click=logout, use_container_width=True)
+        st.caption(tr("Connecté : {name}").format(name=me()["name"]))
+        st.button(tr("Se déconnecter"), key="logout", on_click=logout, use_container_width=True)
 
 
 # ---------- Main ----------
 st.markdown(CSS, unsafe_allow_html=True)
+_, _lang_col = st.columns([5, 1])
+with _lang_col:
+    st.radio("Langue / Language", ["FR", "EN"], horizontal=True, key="lang", label_visibility="collapsed")
 auth_gate()
 if "open" not in st.session_state:
     st.session_state.open = None
@@ -619,10 +695,7 @@ try:
     # Rechargé à chaque action : chacun voit les changements des autres
     st.session_state.projects = load()
 except Exception:
-    st.error(
-        "Impossible de joindre la base de données (projet Supabase en pause, "
-        "ou URL / clé incorrectes). Tes données ne sont pas perdues."
-    )
+    st.error(tr("Impossible de joindre la base de données (projet Supabase en pause, ou URL / clé incorrectes). Tes données ne sont pas perdues."))
     st.stop()
 sidebar()
 banner()
