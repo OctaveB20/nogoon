@@ -197,6 +197,7 @@ CSS = """
 .st-key-lang label:hover { border-color: rgba(139,123,255,.5); }
 .st-key-lang label:has(input:checked) { background: rgba(139,123,255,.24); border-color: rgba(139,123,255,.65); }
 .st-key-lang label > div:first-child { display: none; }
+.stApp label p, .stApp [data-baseweb="tab"] p, .stApp [data-testid="stCaptionContainer"] { color: #ECEBFF !important; }
 </style>
 """
 
