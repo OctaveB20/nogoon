@@ -63,6 +63,13 @@ EN = {
     "L'avancement de chaque projet apparaîtra ici.": "Each project's progress will show up here.",
     "Sauvegarde": "Backup", "Exporter les données": "Export data",
     "Connecté : {name}": "Logged in: {name}", "Se déconnecter": "Log out",
+    "Rester connecté sur cet appareil (cookie de 30 jours)": "Stay logged in on this device (30-day cookie)",
+    "Reconnexion automatique indisponible sur ce navigateur.": "Auto-login unavailable in this browser.",
+    "Reconnexion automatique activée.": "Auto-login enabled.",
+    "Reconnexion automatique désactivée.": "Auto-login turned off.",
+    "Désactiver": "Turn off",
+    "Rester connecté sur cet appareil": "Stay logged in on this device",
+    "Enregistre un cookie de 30 jours pour te reconnecter automatiquement.": "Saves a 30-day cookie to log you back in automatically.",
 }
 
 
@@ -190,7 +197,6 @@ CSS = """
 .st-key-lang label:hover { border-color: rgba(139,123,255,.5); }
 .st-key-lang label:has(input:checked) { background: rgba(139,123,255,.24); border-color: rgba(139,123,255,.65); }
 .st-key-lang label > div:first-child { display: none; }
-.stApp label p, .stApp [data-baseweb="tab"] p, .stApp [data-testid="stCaptionContainer"] { color: #ECEBFF !important; }
 </style>
 """
 
@@ -280,6 +286,7 @@ def start_session(s):
     u = s["user"]
     name = (u.get("user_metadata") or {}).get("name") or u.get("email", "?")
     st.session_state.user = {"id": u["id"], "name": name}
+    st.session_state.rt = s["refresh_token"]
 
 
 def logout():
@@ -296,6 +303,14 @@ except Exception:
     cm = None
 
 
+def set_cookie(value, key):
+    exp = datetime.now() + timedelta(days=30)
+    try:
+        cm.set(COOKIE, value, expires_at=exp, same_site="lax", key=key)
+    except TypeError:
+        cm.set(COOKIE, value, expires_at=exp, key=key)
+
+
 def auth_gate():
     if "user" in st.session_state:
         return
@@ -309,7 +324,7 @@ def auth_gate():
                 s = _token("refresh_token", {"refresh_token": rt})
                 if s:
                     start_session(s)
-                    cm.set(COOKIE, s["refresh_token"], expires_at=exp, key="set_rt_auto")
+                    set_cookie(s["refresh_token"], "set_rt_auto")
                     return
     fresh = None
     box = st.empty()
@@ -322,12 +337,13 @@ def auth_gate():
         with t1:
             email = st.text_input("Email", key="li_email")
             pwd = st.text_input(tr("Mot de passe"), type="password", key="li_pwd")
+            remember1 = st.checkbox(tr("Rester connecté sur cet appareil (cookie de 30 jours)"), key="li_remember")
             if st.button(tr("Se connecter"), type="primary", key="li_btn"):
                 s = _token("password", {"email": email.strip(), "password": pwd})
                 if s:
                     start_session(s)
                     st.session_state.logged_out = False
-                    fresh = s["refresh_token"]
+                    fresh = s["refresh_token"] if remember1 else None
                 else:
                     st.error(tr("Email ou mot de passe incorrect."))
         with t2:
@@ -335,6 +351,7 @@ def auth_gate():
             email2 = st.text_input("Email", key="su_email")
             pwd2 = st.text_input(tr("Mot de passe (6 caractères minimum)"), type="password", key="su_pwd")
             code = st.text_input(tr("Code d'invitation"), type="password", key="su_code")
+            remember2 = st.checkbox(tr("Rester connecté sur cet appareil (cookie de 30 jours)"), key="su_remember")
             if st.button(tr("Créer mon compte"), type="primary", key="su_btn"):
                 err = sign_up(name, email2, pwd2, code)
                 if err:
@@ -344,11 +361,13 @@ def auth_gate():
                     if s:
                         start_session(s)
                         st.session_state.logged_out = False
-                        fresh = s["refresh_token"]
+                        fresh = s["refresh_token"] if remember2 else None
+        if cm is None:
+            st.caption(tr("Reconnexion automatique indisponible sur ce navigateur."))
     if "user" in st.session_state:
         box.empty()
         if cm is not None and fresh:
-            cm.set(COOKIE, fresh, expires_at=exp, key="set_rt_login")
+            set_cookie(fresh, "set_rt_login")
         return
     st.stop()
 
@@ -680,6 +699,18 @@ def sidebar():
             use_container_width=True,
         )
         st.caption(tr("Connecté : {name}").format(name=me()["name"]))
+        if cm is None:
+            st.caption(tr("Reconnexion automatique indisponible sur ce navigateur."))
+        elif cm.get(COOKIE):
+            st.caption(tr("Reconnexion automatique activée."))
+            if st.button(tr("Désactiver"), key="cookie_off", use_container_width=True):
+                cm.delete(COOKIE, key="del_rt_side")
+                st.toast(tr("Reconnexion automatique désactivée."))
+        else:
+            if st.button(tr("Rester connecté sur cet appareil"), key="cookie_on", use_container_width=True):
+                set_cookie(st.session_state.rt, "set_rt_side")
+                st.toast(tr("Reconnexion automatique activée."))
+            st.caption(tr("Enregistre un cookie de 30 jours pour te reconnecter automatiquement."))
         st.button(tr("Se déconnecter"), key="logout", on_click=logout, use_container_width=True)
 
 
