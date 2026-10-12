@@ -1,7 +1,8 @@
+import hmac
 import html
 import json
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import requests
@@ -118,69 +119,167 @@ CSS = """
 .ring-name { font-weight: 700; color: var(--text); font-size: .95rem; line-height: 1.2; }
 .ring-sub { color: var(--muted); font-size: .8rem; margin-top: .15rem; }
 .by { color: var(--muted); font-size: .76rem; margin-top: .1rem; }
+.mt-row { display: flex; align-items: center; gap: .8rem; padding: .7rem 1rem; margin-bottom: .5rem; border-radius: 14px; background: rgba(255,255,255,.04); border: 1px solid var(--line); }
+.mt-row .t-title { flex: 1; }
 </style>
 """
 
 
 # ---------- Données ----------
-def _supabase():
-    """URL et clé lues dans les Secrets Streamlit ; None si absents (mode local)."""
-    try:
-        return st.secrets["SUPABASE_URL"].rstrip("/"), st.secrets["SUPABASE_KEY"]
-    except Exception:
-        return None
+URL = KEY = ANON = None
+_cfg_ok = True
+try:
+    URL = st.secrets["SUPABASE_URL"].rstrip("/")
+    KEY = st.secrets["SUPABASE_KEY"]
+    ANON = st.secrets.get("SUPABASE_ANON_KEY", KEY)
+except Exception:
+    _cfg_ok = False
+if not _cfg_ok:
+    st.error("Secrets Supabase introuvables (SUPABASE_URL, SUPABASE_KEY, SUPABASE_ANON_KEY, INVITE_CODE).")
+    st.stop()
+
+H = {"apikey": KEY, "Authorization": f"Bearer {KEY}"}
+COOKIE = "ag_rt"
+
+
+def rest(method, path, headers=None, **kw):
+    r = requests.request(
+        method, f"{URL}/rest/v1/{path}",
+        headers={**H, "Content-Type": "application/json", **(headers or {})}, timeout=10, **kw,
+    )
+    r.raise_for_status()
+    return r.json() if r.content else None
+
+
+def me():
+    return st.session_state.user
+
+
+def profiles():
+    return rest("GET", "profiles", params={"select": "id,name", "order": "name"})
 
 
 def load():
-    cfg = _supabase()
-    if cfg:
-        url, key = cfg
-        r = requests.get(
-            f"{url}/rest/v1/app_state?id=eq.1&select=data",
-            headers={"apikey": key},
-            timeout=10,
-        )
-        r.raise_for_status()  # en cas d'échec on s'arrête : on n'écrase jamais la base
-        rows = r.json()
-        return rows[0]["data"] if rows else []
-    if DATA_FILE.exists():
-        try:
-            return json.loads(DATA_FILE.read_text("utf-8"))
-        except Exception:
-            return []
-    return []
+    """Projets dont l'utilisateur connecté est membre."""
+    rows = rest("GET", "projects", params={"member_ids": f"cs.{{{me()['id']}}}", "select": "data"})
+    return [r["data"] for r in rows]
 
 
 def save():
-    cfg = _supabase()
-    if cfg:
-        url, key = cfg
-        try:
-            r = requests.patch(
-                f"{url}/rest/v1/app_state?id=eq.1",
-                headers={"apikey": key, "Content-Type": "application/json", "Prefer": "return=minimal"},
-                json={"data": st.session_state.projects},
-                timeout=10,
-            )
-            r.raise_for_status()
-        except Exception:
-            st.toast("Sauvegarde impossible, réessaie dans un instant.", icon="⚠️")
-        return
-    DATA_FILE.write_text(
-        json.dumps(st.session_state.projects, ensure_ascii=False, indent=2), "utf-8"
+    try:
+        rows = [
+            {"id": p["id"], "member_ids": p["member_ids"], "data": p}
+            for p in st.session_state.projects
+        ]
+        if rows:
+            rest("POST", "projects", json=rows, headers={"Prefer": "resolution=merge-duplicates,return=minimal"})
+    except Exception:
+        st.toast("Sauvegarde impossible, réessaie dans un instant.", icon="⚠️")
+
+
+# ---------- Comptes ----------
+def sign_up(name, email, pwd, code):
+    invite = str(st.secrets.get("INVITE_CODE", ""))
+    if not invite:
+        return "Inscriptions fermées (INVITE_CODE absent des Secrets)."
+    if not hmac.compare_digest(code.strip().encode(), invite.encode()):
+        return "Code d'invitation incorrect."
+    name = name.strip()
+    if len(name) < 2 or len(pwd) < 6 or "@" not in email:
+        return "Vérifie le nom, l'email et le mot de passe (6 caractères minimum)."
+    if any(x["name"].lower() == name.lower() for x in profiles()):
+        return "Ce nom est déjà pris."
+    r = requests.post(
+        f"{URL}/auth/v1/admin/users", headers=H, timeout=10,
+        json={"email": email.strip(), "password": pwd, "email_confirm": True, "user_metadata": {"name": name}},
     )
+    if r.status_code >= 400:
+        return "Création impossible (cet email est peut-être déjà utilisé)."
+    rest("POST", "profiles", json={"id": r.json()["id"], "name": name}, headers={"Prefer": "return=minimal"})
+    return None
 
 
-if "open" not in st.session_state:
+def _token(grant, payload):
+    r = requests.post(
+        f"{URL}/auth/v1/token?grant_type={grant}", headers={"apikey": ANON}, json=payload, timeout=10
+    )
+    return r.json() if r.status_code == 200 else None
+
+
+def start_session(s):
+    u = s["user"]
+    name = (u.get("user_metadata") or {}).get("name") or u.get("email", "?")
+    st.session_state.user = {"id": u["id"], "name": name}
+
+
+def logout():
+    for k in ("user", "projects"):
+        st.session_state.pop(k, None)
     st.session_state.open = None
+    st.session_state.logged_out = True
+
+
 try:
-    # Rechargé à chaque action : chacun voit les changements des autres
-    st.session_state.projects = load()
+    import extra_streamlit_components as stx
+    cm = stx.CookieManager(key="cm")
 except Exception:
-    st.error(
-        "Impossible de joindre la base de données (projet Supabase en pause, "
-        "ou URL / clé incorrectes). Tes données ne sont pas perdues."
-    )
+    cm = None
+
+
+def auth_gate():
+    if "user" in st.session_state:
+        return
+    exp = datetime.now() + timedelta(days=30)
+    if cm is not None:
+        if st.session_state.get("logged_out"):
+            cm.delete(COOKIE, key="del_rt")
+        else:
+            rt = cm.get(COOKIE)
+            if rt:
+                s = _token("refresh_token", {"refresh_token": rt})
+                if s:
+                    start_session(s)
+                    cm.set(COOKIE, s["refresh_token"], expires_at=exp, key="set_rt_auto")
+                    return
+    fresh = None
+    box = st.empty()
+    with box.container():
+        st.markdown(
+            '<div class="banner"><h1>anti gooner</h1><p>Connecte-toi pour retrouver tes projets.</p></div>',
+            unsafe_allow_html=True,
+        )
+        t1, t2 = st.tabs(["Connexion", "Créer un compte"])
+        with t1:
+            email = st.text_input("Email", key="li_email")
+            pwd = st.text_input("Mot de passe", type="password", key="li_pwd")
+            if st.button("Se connecter", type="primary", key="li_btn"):
+                s = _token("password", {"email": email.strip(), "password": pwd})
+                if s:
+                    start_session(s)
+                    st.session_state.logged_out = False
+                    fresh = s["refresh_token"]
+                else:
+                    st.error("Email ou mot de passe incorrect.")
+        with t2:
+            name = st.text_input("Ton prénom (visible par tes amis)", key="su_name")
+            email2 = st.text_input("Email", key="su_email")
+            pwd2 = st.text_input("Mot de passe (6 caractères minimum)", type="password", key="su_pwd")
+            code = st.text_input("Code d'invitation", type="password", key="su_code")
+            if st.button("Créer mon compte", type="primary", key="su_btn"):
+                err = sign_up(name, email2, pwd2, code)
+                if err:
+                    st.error(err)
+                else:
+                    s = _token("password", {"email": email2.strip(), "password": pwd2})
+                    if s:
+                        start_session(s)
+                        st.session_state.logged_out = False
+                        fresh = s["refresh_token"]
+    if "user" in st.session_state:
+        box.empty()
+        if cm is not None and fresh:
+            cm.set(COOKIE, fresh, expires_at=exp, key="set_rt_login")
+        return
     st.stop()
 
 
@@ -227,7 +326,7 @@ def set_open(pid):
 
 
 def toggle(pid, tid):
-    who = st.session_state.get(f"who_{pid}") or ""
+    who = me()["name"]
     for t in get_project(pid)["tasks"]:
         if t["id"] == tid:
             t["done"] = st.session_state[f"chk_{tid}"]
@@ -242,18 +341,24 @@ def delete_task(pid, tid):
 
 
 def delete_project(pid):
+    try:
+        rest("DELETE", "projects", params={"id": f"eq.{pid}"})
+    except Exception:
+        st.toast("Suppression impossible, réessaie dans un instant.", icon="⚠️")
+        return
     st.session_state.projects = [p for p in st.session_state.projects if p["id"] != pid]
     st.session_state.open = None
-    save()
 
 
 def add_member(pid):
-    name = st.session_state.get("new_member", "").strip()
+    name = st.session_state.get("new_member")
     p = get_project(pid)
-    if name and name not in p["members"]:
-        p["members"].append(name)
+    match = next((x for x in profiles() if x["name"] == name), None)
+    if match and match["id"] not in p["member_ids"]:
+        p["members"].append(match["name"])
+        p["member_ids"].append(match["id"])
         save()
-    st.session_state.new_member = ""
+    st.session_state.new_member = None
 
 
 def set_project_due(pid):
@@ -276,7 +381,10 @@ def new_project():
     due = st.date_input(
         "Deadline du projet", value=date.today() + timedelta(days=14), format="DD/MM/YYYY"
     )
-    members = st.text_input("Qui est dans l'équipe ?", placeholder="Lina, Hugo, Sam")
+    others = [x for x in profiles() if x["id"] != me()["id"]]
+    chosen = st.multiselect(
+        "Qui est dans l'équipe ?", [x["name"] for x in others], placeholder="Ajoute des amis inscrits"
+    )
     if st.button("Créer le projet", type="primary", use_container_width=True):
         if not name.strip():
             st.error("Donne un nom au projet.")
@@ -288,7 +396,9 @@ def new_project():
                 "desc": desc.strip(),
                 "due": due.isoformat(),
                 "color": COLORS[len(st.session_state.projects) % len(COLORS)],
-                "members": [m.strip() for m in members.split(",") if m.strip()],
+                "members": [me()["name"]] + chosen,
+                "member_ids": [me()["id"]] + [x["id"] for x in others if x["name"] in chosen],
+                "owner_id": me()["id"],
                 "tasks": [],
             }
         )
@@ -374,6 +484,21 @@ def board():
             '<div class="empty">Aucun projet pour l\'instant. Clique sur le + pour créer le premier.</div>',
             unsafe_allow_html=True,
         )
+    mine = sorted(
+        ((p, t) for p in projects for t in p["tasks"] if not t["done"] and t["owner"] == me()["name"]),
+        key=lambda x: x[1]["due"],
+    )
+    if mine:
+        st.markdown(
+            '<div class="side-title" style="margin-top:2.2rem">Mes tâches</div>', unsafe_allow_html=True
+        )
+        for p, t in mine:
+            st.markdown(
+                f'<div class="mt-row"><span class="dot" style="background:{p["color"]};color:{p["color"]}"></span>'
+                f'<span class="t-title">{esc(t["title"])}</span><span class="owner">{esc(p["name"])}</span>'
+                f'{due_badge(t["due"])}</div>',
+                unsafe_allow_html=True,
+            )
 
 
 def project_view(p):
@@ -395,24 +520,19 @@ def project_view(p):
     if c1.button("+  Nouvelle tâche", type="primary", key="add_task", use_container_width=True):
         new_task(p["id"])
     with c2.popover("Gérer le projet", use_container_width=True):
-        st.text_input("Ajouter un membre", key="new_member", placeholder="Prénom")
+        avail = [x["name"] for x in profiles() if x["id"] not in p["member_ids"]]
+        st.selectbox(
+            "Ajouter un membre", avail, index=None, key="new_member", placeholder="Choisis un ami inscrit"
+        )
         st.button("Ajouter", key="add_member", on_click=add_member, args=(p["id"],))
         st.date_input(
             "Deadline du projet", value=parse(p["due"]), format="DD/MM/YYYY",
             key=f"pdue_{p['id']}", on_change=set_project_due, args=(p["id"],),
         )
-    if c3.button("Supprimer", key="del_project", use_container_width=True):
+    if p.get("owner_id") == me()["id"] and c3.button("Supprimer", key="del_project", use_container_width=True):
         confirm_delete(p["id"])
 
-    if p["members"]:
-        c4.selectbox(
-            "Je suis", p["members"], index=None, placeholder="Je suis… (choisis ton prénom)",
-            key=f"who_{p['id']}", label_visibility="collapsed",
-        )
-    who = st.session_state.get(f"who_{p['id']}")
-    locked = bool(p["members"]) and not who
-    if locked:
-        st.caption("Choisis ton prénom pour pouvoir marquer les tâches comme faites.")
+    locked = False
 
     st.write("")
     tasks = sorted(p["tasks"], key=lambda t: (t["done"], t["due"]))
@@ -486,10 +606,24 @@ def sidebar():
             on_click="ignore",
             use_container_width=True,
         )
+        st.caption(f"Connecté : {me()['name']}")
+        st.button("Se déconnecter", key="logout", on_click=logout, use_container_width=True)
 
 
 # ---------- Main ----------
 st.markdown(CSS, unsafe_allow_html=True)
+auth_gate()
+if "open" not in st.session_state:
+    st.session_state.open = None
+try:
+    # Rechargé à chaque action : chacun voit les changements des autres
+    st.session_state.projects = load()
+except Exception:
+    st.error(
+        "Impossible de joindre la base de données (projet Supabase en pause, "
+        "ou URL / clé incorrectes). Tes données ne sont pas perdues."
+    )
+    st.stop()
 sidebar()
 banner()
 current = get_project(st.session_state.open) if st.session_state.open else None
