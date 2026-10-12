@@ -2,11 +2,13 @@ import hmac
 import html
 import json
 import uuid
+from urllib.parse import quote, unquote
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 
 st.set_page_config(page_title="anti gooner", page_icon="🎯", layout="wide", initial_sidebar_state="expanded")
 
@@ -197,7 +199,6 @@ CSS = """
 .st-key-lang label:hover { border-color: rgba(139,123,255,.5); }
 .st-key-lang label:has(input:checked) { background: rgba(139,123,255,.24); border-color: rgba(139,123,255,.65); }
 .st-key-lang label > div:first-child { display: none; }
-.stApp label p, .stApp [data-baseweb="tab"] p, .stApp [data-testid="stCaptionContainer"] { color: #ECEBFF !important; }
 </style>
 """
 
@@ -297,36 +298,47 @@ def logout():
     st.session_state.logged_out = True
 
 
-try:
-    import extra_streamlit_components as stx
-    cm = stx.CookieManager(key="cm")
-except Exception:
-    cm = None
+def _cookie_js(value, max_age):
+    js = (
+        f"var c='{COOKIE}={value}; max-age={max_age}; path=/; SameSite=Lax'"
+        "+(location.protocol==='https:'?'; Secure':'');"
+        "try{document.cookie=c;}catch(e){try{window.parent.document.cookie=c;}catch(e2){}}"
+    )
+    components.html(f"<script>{js}</script>", height=0)
 
 
-def set_cookie(value, key):
-    exp = datetime.now() + timedelta(days=30)
+def get_cookie():
     try:
-        cm.set(COOKIE, value, expires_at=exp, same_site="lax", key=key)
-    except TypeError:
-        cm.set(COOKIE, value, expires_at=exp, key=key)
+        v = st.context.cookies.get(COOKIE)
+        return unquote(v) if v else None
+    except Exception:
+        return None
+
+
+def set_cookie(value):
+    _cookie_js(quote(value, safe=""), 30 * 24 * 3600)
+    st.session_state.cookie_on = True
+
+
+def delete_cookie():
+    _cookie_js("", 0)
+    st.session_state.cookie_on = False
 
 
 def auth_gate():
     if "user" in st.session_state:
         return
-    exp = datetime.now() + timedelta(days=30)
-    if cm is not None:
-        if st.session_state.get("logged_out"):
-            cm.delete(COOKIE, key="del_rt")
-        else:
-            rt = cm.get(COOKIE)
-            if rt:
-                s = _token("refresh_token", {"refresh_token": rt})
-                if s:
-                    start_session(s)
-                    set_cookie(s["refresh_token"], "set_rt_auto")
-                    return
+    if st.session_state.get("logged_out"):
+        delete_cookie()
+    elif not st.session_state.get("rt_tried"):
+        st.session_state.rt_tried = True  # un seul essai par session
+        rt = get_cookie()
+        if rt:
+            s = _token("refresh_token", {"refresh_token": rt})
+            if s:
+                start_session(s)
+                set_cookie(s["refresh_token"])
+                return
     fresh = None
     box = st.empty()
     with box.container():
@@ -363,12 +375,10 @@ def auth_gate():
                         start_session(s)
                         st.session_state.logged_out = False
                         fresh = s["refresh_token"] if remember2 else None
-        if cm is None:
-            st.caption(tr("Reconnexion automatique indisponible sur ce navigateur."))
     if "user" in st.session_state:
         box.empty()
-        if cm is not None and fresh:
-            set_cookie(fresh, "set_rt_login")
+        if fresh:
+            set_cookie(fresh)
         return
     st.stop()
 
@@ -700,16 +710,14 @@ def sidebar():
             use_container_width=True,
         )
         st.caption(tr("Connecté : {name}").format(name=me()["name"]))
-        if cm is None:
-            st.caption(tr("Reconnexion automatique indisponible sur ce navigateur."))
-        elif cm.get(COOKIE):
+        if st.session_state.get("cookie_on", bool(get_cookie())):
             st.caption(tr("Reconnexion automatique activée."))
             if st.button(tr("Désactiver"), key="cookie_off", use_container_width=True):
-                cm.delete(COOKIE, key="del_rt_side")
+                delete_cookie()
                 st.toast(tr("Reconnexion automatique désactivée."))
         else:
             if st.button(tr("Rester connecté sur cet appareil"), key="cookie_on", use_container_width=True):
-                set_cookie(st.session_state.rt, "set_rt_side")
+                set_cookie(st.session_state.rt)
                 st.toast(tr("Reconnexion automatique activée."))
             st.caption(tr("Enregistre un cookie de 30 jours pour te reconnecter automatiquement."))
         st.button(tr("Se déconnecter"), key="logout", on_click=logout, use_container_width=True)
