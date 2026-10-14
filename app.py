@@ -72,6 +72,11 @@ EN = {
     "Désactiver": "Turn off",
     "Rester connecté sur cet appareil": "Stay logged in on this device",
     "Enregistre un cookie de 30 jours pour te reconnecter automatiquement.": "Saves a 30-day cookie to log you back in automatically.",
+    "Continuer avec Google": "Continue with Google",
+    "Ton compte Google n'a pas d'email vérifié.": "Your Google account has no verified email.",
+    "Première connexion avec {email}. Choisis ton prénom et entre le code d'invitation.": "First login with {email}. Pick your first name and enter the invitation code.",
+    "Prénom trop court.": "First name too short.",
+    "Création impossible, réessaie dans un instant.": "Could not create the account, try again in a moment.",
 }
 
 
@@ -199,6 +204,12 @@ CSS = """
 .st-key-lang label:hover { border-color: rgba(139,123,255,.5); }
 .st-key-lang label:has(input:checked) { background: rgba(139,123,255,.24); border-color: rgba(139,123,255,.65); }
 .st-key-lang label > div:first-child { display: none; }
+[data-testid="stForm"] { border: none; padding: 0; }
+.stFormSubmitButton > button {
+  border-radius: 12px; border: none; background: linear-gradient(135deg, #8B7BFF, #6A58F0); color: #fff;
+  font-weight: 600; box-shadow: 0 10px 24px -12px rgba(139,123,255,.9); transition: all .25s ease;
+}
+.stFormSubmitButton > button:hover { filter: brightness(1.1); transform: translateY(-1px); }
 </style>
 """
 
@@ -255,131 +266,71 @@ def save():
         st.toast(tr("Sauvegarde impossible, réessaie dans un instant."), icon="⚠️")
 
 
-# ---------- Comptes ----------
-def sign_up(name, email, pwd, code):
+# ---------- Comptes (connexion Google via st.login) ----------
+def register(name, code, email):
     invite = str(st.secrets.get("INVITE_CODE", ""))
     if not invite:
         return tr("Inscriptions fermées (INVITE_CODE absent des Secrets).")
     if not hmac.compare_digest(code.strip().encode(), invite.encode()):
         return tr("Code d'invitation incorrect.")
     name = name.strip()
-    if len(name) < 2 or len(pwd) < 6 or "@" not in email:
-        return tr("Vérifie le nom, l'email et le mot de passe (6 caractères minimum).")
+    if len(name) < 2:
+        return tr("Prénom trop court.")
     if any(x["name"].lower() == name.lower() for x in profiles()):
         return tr("Ce nom est déjà pris.")
-    r = requests.post(
-        f"{URL}/auth/v1/admin/users", headers=H, timeout=10,
-        json={"email": email.strip(), "password": pwd, "email_confirm": True, "user_metadata": {"name": name}},
-    )
-    if r.status_code >= 400:
-        return tr("Création impossible (cet email est peut-être déjà utilisé).")
-    rest("POST", "profiles", json={"id": r.json()["id"], "name": name}, headers={"Prefer": "return=minimal"})
+    try:
+        rest(
+            "POST", "profiles",
+            json={"id": str(uuid.uuid4()), "name": name, "email": email},
+            headers={"Prefer": "return=minimal"},
+        )
+    except Exception:
+        return tr("Création impossible, réessaie dans un instant.")
     return None
 
 
-def _token(grant, payload):
-    r = requests.post(
-        f"{URL}/auth/v1/token?grant_type={grant}", headers={"apikey": ANON}, json=payload, timeout=10
+def hero(text):
+    st.markdown(
+        '<div class="banner"><h1>anti gooner</h1><p>' + text + "</p></div>", unsafe_allow_html=True
     )
-    return r.json() if r.status_code == 200 else None
-
-
-def start_session(s):
-    u = s["user"]
-    name = (u.get("user_metadata") or {}).get("name") or u.get("email", "?")
-    st.session_state.user = {"id": u["id"], "name": name}
-    st.session_state.rt = s["refresh_token"]
-
-
-def logout():
-    for k in ("user", "projects"):
-        st.session_state.pop(k, None)
-    st.session_state.open = None
-    st.session_state.logged_out = True
-
-
-def _cookie_js(value, max_age):
-    js = (
-        f"var c='{COOKIE}={value}; max-age={max_age}; path=/; SameSite=Lax'"
-        "+(location.protocol==='https:'?'; Secure':'');"
-        "try{document.cookie=c;}catch(e){try{window.parent.document.cookie=c;}catch(e2){}}"
-    )
-    components.html(f"<script>{js}</script>", height=0)
-
-
-def get_cookie():
-    try:
-        v = st.context.cookies.get(COOKIE)
-        return unquote(v) if v else None
-    except Exception:
-        return None
-
-
-def set_cookie(value):
-    _cookie_js(quote(value, safe=""), 30 * 24 * 3600)
-    st.session_state.cookie_on = True
-
-
-def delete_cookie():
-    _cookie_js("", 0)
-    st.session_state.cookie_on = False
 
 
 def auth_gate():
     if "user" in st.session_state:
         return
-    if st.session_state.get("logged_out"):
-        delete_cookie()
-    elif not st.session_state.get("rt_tried"):
-        st.session_state.rt_tried = True  # un seul essai par session
-        rt = get_cookie()
-        if rt:
-            s = _token("refresh_token", {"refresh_token": rt})
-            if s:
-                start_session(s)
-                set_cookie(s["refresh_token"])
-                return
-    fresh = None
-    box = st.empty()
-    with box.container():
-        st.markdown(
-            '<div class="banner"><h1>anti gooner</h1><p>' + tr("Connecte-toi pour retrouver tes projets.") + '</p></div>',
-            unsafe_allow_html=True,
-        )
-        t1, t2 = st.tabs([tr("Connexion"), tr("Créer un compte")])
-        with t1:
-            email = st.text_input("Email", key="li_email")
-            pwd = st.text_input(tr("Mot de passe"), type="password", key="li_pwd")
-            remember1 = st.checkbox(tr("Rester connecté sur cet appareil (cookie de 30 jours)"), key="li_remember")
-            if st.button(tr("Se connecter"), type="primary", key="li_btn"):
-                s = _token("password", {"email": email.strip(), "password": pwd})
-                if s:
-                    start_session(s)
-                    st.session_state.logged_out = False
-                    fresh = s["refresh_token"] if remember1 else None
-                else:
-                    st.error(tr("Email ou mot de passe incorrect."))
-        with t2:
-            name = st.text_input(tr("Ton prénom (visible par tes amis)"), key="su_name")
-            email2 = st.text_input("Email", key="su_email")
-            pwd2 = st.text_input(tr("Mot de passe (6 caractères minimum)"), type="password", key="su_pwd")
-            code = st.text_input(tr("Code d'invitation"), type="password", key="su_code")
-            remember2 = st.checkbox(tr("Rester connecté sur cet appareil (cookie de 30 jours)"), key="su_remember")
-            if st.button(tr("Créer mon compte"), type="primary", key="su_btn"):
-                err = sign_up(name, email2, pwd2, code)
-                if err:
-                    st.error(err)
-                else:
-                    s = _token("password", {"email": email2.strip(), "password": pwd2})
-                    if s:
-                        start_session(s)
-                        st.session_state.logged_out = False
-                        fresh = s["refresh_token"] if remember2 else None
-    if "user" in st.session_state:
-        box.empty()
-        if fresh:
-            set_cookie(fresh)
+    if not getattr(st.user, "is_logged_in", False):
+        hero(tr("Connecte-toi pour retrouver tes projets."))
+        st.button(tr("Continuer avec Google"), type="primary", on_click=st.login, key="google_login")
+        st.stop()
+
+    email = (getattr(st.user, "email", "") or "").strip().lower()
+    if not email or getattr(st.user, "email_verified", True) is False:
+        hero(tr("Ton compte Google n'a pas d'email vérifié."))
+        st.button(tr("Se déconnecter"), on_click=st.logout, key="logout_err")
+        st.stop()
+
+    try:
+        rows = rest("GET", "profiles", params={"email": f"eq.{email}", "select": "id,name"})
+    except Exception:
+        st.error(tr("Impossible de joindre la base de données (projet Supabase en pause, ou URL / clé incorrectes). Tes données ne sont pas perdues."))
+        st.stop()
+    if rows:
+        st.session_state.user = {"id": rows[0]["id"], "name": rows[0]["name"]}
         return
+
+    # Première connexion : prénom + code d'invitation
+    hero(tr("Première connexion avec {email}. Choisis ton prénom et entre le code d'invitation.").format(email=email))
+    with st.form("onboarding", border=False):
+        name = st.text_input(tr("Ton prénom (visible par tes amis)"), key="ob_name", autocomplete="given-name")
+        code = st.text_input(tr("Code d'invitation"), type="password", key="ob_code", autocomplete="off")
+        go = st.form_submit_button(tr("Créer mon compte"), type="primary")
+    st.button(tr("Se déconnecter"), on_click=st.logout, key="logout_ob")
+    if go:
+        err = register(name, code, email)
+        if err:
+            st.error(err)
+        else:
+            st.rerun()
     st.stop()
 
 
@@ -710,17 +661,7 @@ def sidebar():
             use_container_width=True,
         )
         st.caption(tr("Connecté : {name}").format(name=me()["name"]))
-        if st.session_state.get("cookie_on", bool(get_cookie())):
-            st.caption(tr("Reconnexion automatique activée."))
-            if st.button(tr("Désactiver"), key="cookie_off", use_container_width=True):
-                delete_cookie()
-                st.toast(tr("Reconnexion automatique désactivée."))
-        else:
-            if st.button(tr("Rester connecté sur cet appareil"), key="cookie_on", use_container_width=True):
-                set_cookie(st.session_state.rt)
-                st.toast(tr("Reconnexion automatique activée."))
-            st.caption(tr("Enregistre un cookie de 30 jours pour te reconnecter automatiquement."))
-        st.button(tr("Se déconnecter"), key="logout", on_click=logout, use_container_width=True)
+        st.button(tr("Se déconnecter"), key="logout", on_click=st.logout, use_container_width=True)
 
 
 # ---------- Main ----------
