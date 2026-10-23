@@ -77,6 +77,7 @@ EN = {
     "Première connexion avec {email}. Choisis ton prénom et entre le code d'invitation.": "First login with {email}. Pick your first name and enter the invitation code.",
     "Prénom trop court.": "First name too short.",
     "Création impossible, réessaie dans un instant.": "Could not create the account, try again in a moment.",
+    "Enregistrer": "Save",
 }
 
 
@@ -573,6 +574,18 @@ def project_view(p):
     if c1.button(tr("+  Nouvelle tâche"), type="primary", key="add_task", use_container_width=True):
         new_task(p["id"])
     with c2.popover(tr("Gérer le projet"), use_container_width=True):
+        with st.form(f"edit_project_{p['id']}", border=False):
+            new_name = st.text_input(tr("Nom du projet"), value=p["name"], key=f"pn_{p['id']}")
+            new_desc = st.text_area(
+                tr("Description (facultatif)"), value=p["desc"], height=90, key=f"pd_{p['id']}"
+            )
+            saved = st.form_submit_button(tr("Enregistrer"))
+        if saved and new_name.strip():
+            p["name"] = new_name.strip()
+            p["desc"] = new_desc.strip()
+            save()
+            st.rerun()
+        st.divider()
         avail = [x["name"] for x in profiles() if x["id"] not in p["member_ids"]]
         st.selectbox(
             tr("Ajouter un membre"), avail, index=None, key="new_member", placeholder=tr("Choisis un ami inscrit")
@@ -610,6 +623,13 @@ def project_view(p):
                 unsafe_allow_html=True,
             )
             with c[4].popover("✎"):
+                with st.form(f"edit_task_{t['id']}", border=False):
+                    new_title = st.text_input(tr("Tâche"), value=t["title"], key=f"tt_{t['id']}")
+                    saved_t = st.form_submit_button(tr("Enregistrer"))
+                if saved_t and new_title.strip():
+                    t["title"] = new_title.strip()
+                    save()
+                    st.rerun()
                 st.date_input(
                     "Deadline", value=parse(t["due"]), format="DD/MM/YYYY",
                     key=f"due_{t['id']}", on_change=set_task_due, args=(p["id"], t["id"]),
