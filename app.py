@@ -451,7 +451,7 @@ def handle_calendar_callback():
         )
 
     encrypted = calendar_fernet().encrypt(refresh_token.encode()).decode()
-    rest(
+        saved_rows = rest(
         "POST", "google_calendar_connections",
         params={"on_conflict": "user_id"},
         json={
@@ -461,8 +461,10 @@ def handle_calendar_callback():
             "scopes": CALENDAR_SCOPES,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         },
-        headers={"Prefer": "resolution=merge-duplicates,return=minimal"},
+        headers={"Prefer": "resolution=merge-duplicates,return=representation"},
     )
+    if not saved_rows:
+        raise RuntimeError("Écriture dans google_calendar_connections sans effet (RLS ou contrainte ?)")
     rest("DELETE", "google_calendar_oauth_states", params={"state": f"eq.{state}"})
     st.session_state.pop("calendar_auth_url", None)
     st.session_state["calendar_notice"] = f"Google Calendar connecté : {google_email}"
@@ -1234,6 +1236,14 @@ elif _cal_row:
         run_sync("Calendrier synchronisé")
 else:
     st.info("Google Calendar non connecté : utilise le bouton « Connecter Google Calendar » dans la barre latérale.")
+with st.expander("Diagnostic Google Calendar"):
+    st.write({
+        "user_id": me()["id"],
+        "connexion_trouvee": bool(_cal_row),
+        "erreur_lecture": _cal_err,
+        "redirect_uri": st.secrets.get("GOOGLE_REDIRECT_URI"),
+        "params_url": list(st.query_params.keys()),
+    })
 
 current = get_project(st.session_state.open) if st.session_state.open else None
 if current:
