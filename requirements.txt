@@ -1,2 +1,7 @@
 streamlit[auth]>=1.43
 requests
+google-api-python-client
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
+cryptography
