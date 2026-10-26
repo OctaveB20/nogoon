@@ -80,6 +80,7 @@ EN = {
     "Enregistrer": "Save",
     "+ {n} autres tâches": "+ {n} more tasks",
     "À faire": "To do", "Terminées": "Done",
+    "Supprimer la tâche": "Delete task",
 }
 
 
@@ -222,13 +223,11 @@ CSS = """
 .avatar { display: inline-flex; align-items: center; justify-content: center; width: 1.7rem; height: 1.7rem; border-radius: 50%; font-size: .78rem; font-weight: 700; margin-right: .55rem; vertical-align: middle; }
 [class*="st-key-task_"] .t-title { font-size: 1rem; }
 [class*="st-key-task_"] label[data-baseweb="checkbox"] > span:first-child { border-radius: 50%; width: 1.4rem; height: 1.4rem; }
-[class*="st-key-task_"] .stButton > button,
 [class*="st-key-task_"] button[data-testid="stPopoverButton"] {
-  background: transparent; border: none; color: var(--muted); min-height: 2rem; padding: 0 .5rem; box-shadow: none;
+  background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.18); color: var(--text);
+  min-height: 2.2rem; min-width: 3rem; padding: 0 .6rem; justify-content: center; border-radius: 10px; box-shadow: none;
 }
-[class*="st-key-task_"] button[data-testid="stPopoverButton"] span[data-testid="stIconMaterial"] { display: none; }
-[class*="st-key-task_"] button[data-testid="stPopoverButton"]:hover { background: rgba(139,123,255,.16); color: #fff; transform: none; }
-[class*="st-key-task_"] .stButton > button:hover { background: rgba(255,107,129,.16); color: #FF8FA3; border: none; transform: none; }
+[class*="st-key-task_"] button[data-testid="stPopoverButton"]:hover { background: rgba(139,123,255,.22); border-color: rgba(139,123,255,.7); color: #fff; transform: none; }
 
 /* Sélecteur de langue */
 .st-key-lang [role="radiogroup"] { gap: .35rem; justify-content: flex-end; }
@@ -670,7 +669,7 @@ def project_view(p):
             label, count = (tr("Terminées"), done) if t["done"] else (tr("À faire"), total - done)
             st.markdown(f'<div class="sec">{label}<span>{count}</span></div>', unsafe_allow_html=True)
         with st.container(key=f"task_{task_status(t)}_{t['id']}"):
-            c = st.columns([0.08, 1.5, 0.6, 0.55, 0.11, 0.11], vertical_alignment="center")
+            c = st.columns([0.08, 1.5, 0.65, 0.6, 0.22], vertical_alignment="center")
             c[0].checkbox(
                 tr("fait"), value=t["done"], key=f"chk_{t['id']}", on_change=toggle,
                 args=(p["id"], t["id"]), label_visibility="collapsed", disabled=locked,
@@ -683,7 +682,7 @@ def project_view(p):
                 f'{due_badge(t["due"], t["done"])}<span class="date-small">{parse(t["due"]):%d/%m}</span>',
                 unsafe_allow_html=True,
             )
-            with c[4].popover("✎"):
+            with c[4].popover(":material/more_horiz:"):
                 with st.form(f"edit_task_{t['id']}", border=False):
                     new_title = st.text_input(tr("Tâche"), value=t["title"], key=f"tt_{t['id']}")
                     saved_t = st.form_submit_button(tr("Enregistrer"))
@@ -695,7 +694,11 @@ def project_view(p):
                     "Deadline", value=parse(t["due"]), format="DD/MM/YYYY",
                     key=f"due_{t['id']}", on_change=set_task_due, args=(p["id"], t["id"]),
                 )
-            c[5].button("✕", key=f"rm_{t['id']}", on_click=delete_task, args=(p["id"], t["id"]))
+                st.divider()
+                st.button(
+                    tr("Supprimer la tâche"), key=f"rm_{t['id']}", on_click=delete_task,
+                    args=(p["id"], t["id"]), use_container_width=True,
+                )
 
 
 def ring(p, active):
