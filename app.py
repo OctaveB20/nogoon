@@ -484,93 +484,124 @@ def calendar_service():
 
 
 def sync_google_calendar():
+    """Synchronise les deadlines et renvoie un bilan détaillé."""
     service = calendar_service()
     if service is None:
         raise RuntimeError("Connecte d'abord ton compte Google Calendar.")
 
-    user_id = me()["id"]
+    user_id = str(me()["id"])
     desired = {}
+    invalid = []
     for project in st.session_state.projects:
-        desired[("project", str(project["id"]))] = {
-            "summary": f"Anti Gooner - Deadline : {project['name']}",
-            "description": project.get("desc", ""),
-            "due": project["due"],
-        }
+        try:
+            desired[("project", str(project["id"]))] = {
+                "summary": f"Anti Gooner - Deadline : {project['name']}",
+                "description": project.get("desc", ""),
+                "due": str(project["due"]),
+            }
+        except (KeyError, TypeError) as exc:
+            invalid.append(f"Projet sans deadline ou identifiant valide : {exc}")
         for task in project.get("tasks", []):
             if task.get("done"):
                 continue
-            desired[("task", str(task["id"]))] = {
-                "summary": f"{project['name']} : {task['title']}",
-                "description": f"Responsable : {task.get('owner', 'Tout le monde')}",
-                "due": task["due"],
-            }
+            try:
+                desired[("task", str(task["id"]))] = {
+                    "summary": f"{project['name']} : {task['title']}",
+                    "description": f"Responsable : {task.get('owner', 'Tout le monde')}",
+                    "due": str(task["due"]),
+                }
+            except (KeyError, TypeError) as exc:
+                invalid.append(f"Tâche sans deadline ou identifiant valide : {exc}")
 
     rows = rest(
         "GET", "google_calendar_events",
         params={"user_id": f"eq.{user_id}", "select": "entity_type,entity_id,google_event_id"},
     )
-    existing = {(r["entity_type"], r["entity_id"]): r["google_event_id"] for r in rows}
+    existing = {
+        (str(r["entity_type"]), str(r["entity_id"])): r["google_event_id"]
+        for r in rows
+    }
+    created = updated = removed = failed = 0
+    errors = list(invalid)
 
     for key, item in desired.items():
         entity_type, entity_id = key
         event_id = existing.get(key)
-        # Google Calendar event IDs accept lowercase a-v and digits; SHA-256 hex fits.
-        stable_id = hashlib.sha256(f"{user_id}:{entity_type}:{entity_id}".encode()).hexdigest()
-        due = date.fromisoformat(item["due"])
-        event = {
-            "summary": item["summary"],
-            "description": item["description"],
-            "start": {"date": due.isoformat()},
-            "end": {"date": (due + timedelta(days=1)).isoformat()},
-        }
+        try:
+            due = date.fromisoformat(item["due"][:10])
+            event = {
+                "summary": item["summary"],
+                "description": item["description"],
+                "start": {"date": due.isoformat()},
+                "end": {"date": (due + timedelta(days=1)).isoformat()},
+            }
+            stable_id = hashlib.sha256(
+                f"{user_id}:{entity_type}:{entity_id}".encode()
+            ).hexdigest()
 
-        if event_id:
-            try:
-                service.events().update(calendarId="primary", eventId=event_id, body=event).execute()
-            except HttpError as exc:
-                if exc.resp.status != 404:
-                    raise
-                event_id = None
+            if event_id:
+                try:
+                    service.events().update(
+                        calendarId="primary", eventId=event_id, body=event
+                    ).execute()
+                    updated += 1
+                except HttpError as exc:
+                    if exc.resp.status != 404:
+                        raise
+                    event_id = None
 
-        if not event_id:
-            event["id"] = stable_id
-            try:
-                service.events().insert(calendarId="primary", body=event).execute()
-            except HttpError as exc:
-                if exc.resp.status != 409:
-                    raise
-                service.events().update(calendarId="primary", eventId=stable_id, body=event).execute()
-            event_id = stable_id
+            if not event_id:
+                event["id"] = stable_id
+                try:
+                    service.events().insert(calendarId="primary", body=event).execute()
+                    created += 1
+                except HttpError as exc:
+                    if exc.resp.status != 409:
+                        raise
+                    service.events().update(
+                        calendarId="primary", eventId=stable_id, body=event
+                    ).execute()
+                    updated += 1
+                event_id = stable_id
 
-        rest(
-            "POST", "google_calendar_events",
-            params={"on_conflict": "user_id,entity_type,entity_id"},
-            json={
-                "user_id": user_id, "entity_type": entity_type,
-                "entity_id": entity_id, "google_event_id": event_id,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            },
-            headers={"Prefer": "resolution=merge-duplicates,return=minimal"},
-        )
+            rest(
+                "POST", "google_calendar_events",
+                params={"on_conflict": "user_id,entity_type,entity_id"},
+                json={
+                    "user_id": user_id, "entity_type": entity_type,
+                    "entity_id": entity_id, "google_event_id": event_id,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                },
+                headers={"Prefer": "resolution=merge-duplicates,return=minimal"},
+            )
+        except Exception as exc:
+            failed += 1
+            errors.append(f"{item.get('summary', entity_id)} : {type(exc).__name__}: {exc}")
 
-    # Remove events for completed/deleted tasks and deleted projects.
+    # Supprime les événements devenus inutiles seulement si leur suppression réussit.
     for key, event_id in existing.items():
         if key in desired:
             continue
         try:
-            service.events().delete(calendarId="primary", eventId=event_id).execute()
-        except HttpError as exc:
-            if exc.resp.status != 404:
-                raise
-        rest(
-            "DELETE", "google_calendar_events",
-            params={
+            try:
+                service.events().delete(calendarId="primary", eventId=event_id).execute()
+            except HttpError as exc:
+                if exc.resp.status != 404:
+                    raise
+            rest("DELETE", "google_calendar_events", params={
                 "user_id": f"eq.{user_id}",
                 "entity_type": f"eq.{key[0]}",
                 "entity_id": f"eq.{key[1]}",
-            },
-        )
-    return len(desired)
+            })
+            removed += 1
+        except Exception as exc:
+            failed += 1
+            errors.append(f"Suppression {key[0]} {key[1]} : {type(exc).__name__}: {exc}")
+
+    return {
+        "created": created, "updated": updated, "removed": removed,
+        "failed": failed, "target": len(desired), "errors": errors,
+    }
 
 
 def me():
@@ -1106,10 +1137,20 @@ def sidebar():
             st.caption(f"Compte : {connection.get('connected_email') or 'Google'}")
             if st.button("Synchroniser maintenant", key="calendar_sync", use_container_width=True):
                 try:
-                    count = sync_google_calendar()
-                    st.success(f"{count} événements synchronisés.")
+                    report = sync_google_calendar()
+                    st.success(
+                        f"Google Calendar : {report['created']} créés, "
+                        f"{report['updated']} mis à jour, {report['removed']} supprimés."
+                    )
+                    if report["failed"]:
+                        st.warning(f"{report['failed']} élément(s) en échec sur {report['target']} éléments à synchroniser.")
+                        for message in report["errors"][:8]:
+                            st.caption(message)
+                    elif report["errors"]:
+                        for message in report["errors"][:8]:
+                            st.caption(message)
                 except Exception as exc:
-                    st.error(f"Synchronisation impossible : {exc}")
+                    st.error(f"Synchronisation impossible : {type(exc).__name__}: {exc}")
             if st.button("Déconnecter Calendar", key="calendar_disconnect", use_container_width=True):
                 st.session_state["calendar_disconnect_confirm"] = True
             if st.session_state.get("calendar_disconnect_confirm"):
@@ -1158,6 +1199,25 @@ except Exception:
     st.stop()
 sidebar()
 banner()
+# Bouton principal visible même si la barre latérale est repliée.
+try:
+    _calendar_connection = calendar_connection()
+except Exception:
+    _calendar_connection = None
+if _calendar_connection:
+    if st.button("📅 Synchroniser Google Calendar", key="calendar_sync_main"):
+        try:
+            _report = sync_google_calendar()
+            st.success(
+                f"Calendrier synchronisé : {_report['created']} créés, "
+                f"{_report['updated']} mis à jour, {_report['removed']} supprimés."
+            )
+            if _report["failed"]:
+                st.warning(f"{_report['failed']} élément(s) en échec sur {_report['target']} éléments.")
+                for _message in _report["errors"][:8]:
+                    st.caption(_message)
+        except Exception as _exc:
+            st.error(f"Synchronisation impossible : {type(_exc).__name__}: {_exc}")
 current = get_project(st.session_state.open) if st.session_state.open else None
 if current:
     project_view(current)
