@@ -1,7 +1,10 @@
 
 import hashlib
 import secrets as py_secrets
+import os
+import time
 
+os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
 import requests
 import streamlit as st
 
@@ -380,7 +383,7 @@ def start_calendar_oauth():
         },
         headers={"Prefer": "return=minimal"},
     )
-    flow = Flow.from_client_config(calendar_client_config(), scopes=CALENDAR_SCOPES, state=state)
+    flow = Flow.from_client_config(     calendar_client_config(), scopes=CALENDAR_SCOPES, state=state,     autogenerate_code_verifier=False, )
     flow.redirect_uri = calendar_redirect_uri()
     url, _ = flow.authorization_url(
         access_type="offline", include_granted_scopes="true", prompt="consent"
@@ -418,7 +421,7 @@ def handle_calendar_callback():
         st.query_params.clear()
         st.rerun()
 
-    flow = Flow.from_client_config(calendar_client_config(), scopes=CALENDAR_SCOPES, state=state)
+    flow = Flow.from_client_config(     calendar_client_config(), scopes=CALENDAR_SCOPES, state=state,     autogenerate_code_verifier=False, )
     flow.redirect_uri = calendar_redirect_uri()
     flow.fetch_token(code=code)
     creds = flow.credentials
@@ -482,6 +485,16 @@ def calendar_service():
         return None
     return build("calendar", "v3", credentials=creds, cache_discovery=False)
 
+def gcal_exec(request, tries=5):
+    for i in range(tries):
+        try:
+            return request.execute()
+        except HttpError as exc:
+            msg = str(exc).lower()
+            if i < tries - 1 and (exc.resp.status in (429, 500, 503) or "ratelimit" in msg):
+                time.sleep(0.5 * 2 ** i)
+                continue
+            raise
 
 def sync_google_calendar():
     """Synchronise les deadlines et renvoie un bilan détaillé."""
