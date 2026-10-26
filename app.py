@@ -79,6 +79,7 @@ EN = {
     "Création impossible, réessaie dans un instant.": "Could not create the account, try again in a moment.",
     "Enregistrer": "Save",
     "+ {n} autres tâches": "+ {n} more tasks",
+    "À faire": "To do", "Terminées": "Done",
 }
 
 
@@ -139,8 +140,16 @@ CSS = """
   transform: translateY(-4px); border-color: rgba(139,123,255,.5);
   box-shadow: 0 22px 44px -22px rgba(139,123,255,.55);
 }
-[class*="st-key-task_"] { border-radius: 16px; padding: .55rem 1rem; }
-[class*="st-key-task_"]:hover { border-color: rgba(255,255,255,.16); }
+[class*="st-key-task_"] {
+  border-radius: 16px; padding: .6rem 1rem .6rem 1.1rem; border-left: 4px solid rgba(255,255,255,.14);
+  margin-bottom: .15rem;
+}
+[class*="st-key-task_"]:hover { transform: translateX(3px); box-shadow: 0 14px 30px -20px rgba(0,0,0,.8); }
+[class*="st-key-task_late_"] { border-left-color: #FF8FA3; background: linear-gradient(90deg, rgba(255,107,129,.10), rgba(255,255,255,.02) 45%); }
+[class*="st-key-task_soon_"] { border-left-color: #FFC46B; }
+[class*="st-key-task_ok_"] { border-left-color: #5CE1C6; }
+[class*="st-key-task_done_"] { border-left-color: rgba(255,255,255,.14); opacity: .6; }
+[class*="st-key-task_done_"]:hover { opacity: 1; }
 .st-key-ph { padding: 1.7rem 1.8rem; margin-bottom: .6rem; }
 
 .pc-name, .ph-title {
@@ -206,6 +215,20 @@ CSS = """
 [class*="st-key-navc_"]:hover .ring-row { border-color: rgba(139,123,255,.55); background: rgba(139,123,255,.09); transform: translateX(3px); }
 .mt-row { display: flex; align-items: center; gap: .8rem; padding: .7rem 1rem; margin-bottom: .5rem; border-radius: 14px; background: rgba(255,255,255,.04); border: 1px solid var(--line); }
 .mt-row .t-title { flex: 1; }
+
+/* Lignes de tâches */
+.sec { display: flex; align-items: center; gap: .6rem; color: var(--muted); font-size: .9rem; font-weight: 700; margin: 1.5rem 0 .6rem; }
+.sec span { background: rgba(255,255,255,.08); border-radius: 99px; padding: .05rem .6rem; font-size: .78rem; }
+.avatar { display: inline-flex; align-items: center; justify-content: center; width: 1.7rem; height: 1.7rem; border-radius: 50%; font-size: .78rem; font-weight: 700; margin-right: .55rem; vertical-align: middle; }
+[class*="st-key-task_"] .t-title { font-size: 1rem; }
+[class*="st-key-task_"] label[data-baseweb="checkbox"] > span:first-child { border-radius: 50%; width: 1.4rem; height: 1.4rem; }
+[class*="st-key-task_"] .stButton > button,
+[class*="st-key-task_"] button[data-testid="stPopoverButton"] {
+  background: transparent; border: none; color: var(--muted); min-height: 2rem; padding: 0 .5rem; box-shadow: none;
+}
+[class*="st-key-task_"] button[data-testid="stPopoverButton"] span[data-testid="stIconMaterial"] { display: none; }
+[class*="st-key-task_"] button[data-testid="stPopoverButton"]:hover { background: rgba(139,123,255,.16); color: #fff; transform: none; }
+[class*="st-key-task_"] .stButton > button:hover { background: rgba(255,107,129,.16); color: #FF8FA3; border: none; transform: none; }
 
 /* Sélecteur de langue */
 .st-key-lang [role="radiogroup"] { gap: .35rem; justify-content: flex-end; }
@@ -567,6 +590,25 @@ def board():
             st.caption(tr("+ {n} autres tâches").format(n=len(mine_all) - 10))
 
 
+def task_status(t):
+    if t["done"]:
+        return "done"
+    n = (parse(t["due"]) - date.today()).days
+    return "late" if n < 0 else ("soon" if n <= 3 else "ok")
+
+
+def owner_chip(owner):
+    if owner == "Tout le monde":
+        letter, color = "👥", "#8E8FB5"
+    else:
+        letter = owner[:1].upper() or "?"
+        color = COLORS[sum(map(ord, owner)) % len(COLORS)]
+    return (
+        f'<span class="avatar" style="background:{color}22;color:{color};border:1px solid {color}55">'
+        f'{esc(letter)}</span><span class="owner">{esc(tr(owner))}</span>'
+    )
+
+
 def project_view(p):
     st.button(tr("←  Retour au board"), key="back", on_click=set_open, args=(None,))
     done, total = progress(p)
@@ -620,9 +662,15 @@ def project_view(p):
             '<div class="empty">' + tr("Pas encore de tâche. Ajoute la première avec sa deadline.") + "</div>",
             unsafe_allow_html=True,
         )
+    last_grp = None
     for t in tasks:
-        with st.container(key=f"task_{t['id']}"):
-            c = st.columns([0.07, 1, 0.35, 0.42, 0.1, 0.1], vertical_alignment="center")
+        grp = "done" if t["done"] else "todo"
+        if grp != last_grp:
+            last_grp = grp
+            label, count = (tr("Terminées"), done) if t["done"] else (tr("À faire"), total - done)
+            st.markdown(f'<div class="sec">{label}<span>{count}</span></div>', unsafe_allow_html=True)
+        with st.container(key=f"task_{task_status(t)}_{t['id']}"):
+            c = st.columns([0.08, 1.5, 0.6, 0.55, 0.11, 0.11], vertical_alignment="center")
             c[0].checkbox(
                 tr("fait"), value=t["done"], key=f"chk_{t['id']}", on_change=toggle,
                 args=(p["id"], t["id"]), label_visibility="collapsed", disabled=locked,
@@ -630,7 +678,7 @@ def project_view(p):
             cls = "t-title done" if t["done"] else "t-title"
             by = f'<div class="by">{tr("fait par")} {esc(t["by"])}</div>' if t["done"] and t.get("by") else ""
             c[1].markdown(f'<div class="{cls}">{esc(t["title"])}</div>{by}', unsafe_allow_html=True)
-            c[2].markdown(f'<span class="owner">{esc(tr(t["owner"]))}</span>', unsafe_allow_html=True)
+            c[2].markdown(owner_chip(t["owner"]), unsafe_allow_html=True)
             c[3].markdown(
                 f'{due_badge(t["due"], t["done"])}<span class="date-small">{parse(t["due"]):%d/%m}</span>',
                 unsafe_allow_html=True,
