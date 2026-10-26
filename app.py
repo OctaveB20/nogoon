@@ -215,12 +215,46 @@ CSS = """
 .ring-sub { color: var(--muted); font-size: .8rem; margin-top: .15rem; }
 .by { color: var(--muted); font-size: .76rem; margin-top: .1rem; }
 
-/* Projets cliquables dans la sidebar : le bouton est invisible et couvre toute la carte */
-[class*="st-key-navc_"] { position: relative; margin-bottom: .6rem; }
-[class*="st-key-navc_"] [data-testid="stElementContainer"]:has(button) { position: absolute; inset: 0; z-index: 3; }
-[class*="st-key-navc_"] .stButton, [class*="st-key-navc_"] .stButton > button { width: 100%; height: 100%; min-height: 0; }
-[class*="st-key-navc_"] .stButton > button { opacity: 0; cursor: pointer; }
-[class*="st-key-navc_"]:hover .ring-row { border-color: rgba(139,123,255,.55); background: rgba(139,123,255,.09); transform: translateX(3px); }
+/* Projets cliquables dans la sidebar : superposition du bouton sur toute la carte */
+[class*="st-key-navc_"] {
+  position: relative;
+  display: grid;
+  margin-bottom: .6rem;
+  isolation: isolate;
+}
+[class*="st-key-navc_"] > [data-testid="stElementContainer"] {
+  grid-area: 1 / 1;
+  min-width: 0;
+}
+[class*="st-key-navc_"] [data-testid="stElementContainer"]:has(button) {
+  position: relative;
+  z-index: 3;
+  align-self: stretch;
+  min-height: 100%;
+}
+[class*="st-key-navc_"] [data-testid="stElementContainer"]:has(button) .stButton,
+[class*="st-key-navc_"] [data-testid="stElementContainer"]:has(button) .stButton > button {
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+}
+[class*="st-key-navc_"] .stButton > button {
+  opacity: 0;
+  cursor: pointer;
+  padding: 0;
+  border: 0;
+}
+[class*="st-key-navc_"]:hover .ring-row,
+[class*="st-key-navc_"]:focus-within .ring-row {
+  border-color: rgba(139,123,255,.7);
+  background: rgba(139,123,255,.12);
+  transform: translateX(3px);
+}
+[class*="st-key-navc_"] .stButton > button:focus-visible {
+  opacity: .01;
+  outline: 2px solid #8B7BFF;
+  outline-offset: -3px;
+}
 .mt-row { display: flex; align-items: center; gap: .8rem; padding: .7rem 1rem; margin-bottom: .5rem; border-radius: 14px; background: rgba(255,255,255,.04); border: 1px solid var(--line); }
 .mt-row .t-title { flex: 1; }
 
@@ -775,7 +809,7 @@ def sidebar():
         for p in projects:
             with st.container(key=f"navc_{p['id']}"):
                 st.markdown(ring(p, p["id"] == st.session_state.open), unsafe_allow_html=True)
-                st.button(p["name"], key=f"go_{p['id']}", on_click=set_open, args=(p["id"],))
+                st.button(p["name"], key=f"go_{p['id']}", on_click=set_open, args=(p["id"],), use_container_width=True)
         st.markdown(
             '<div class="side-title" style="font-size:1.05rem;margin-top:1.8rem">' + tr("Sauvegarde") + "</div>",
             unsafe_allow_html=True,
