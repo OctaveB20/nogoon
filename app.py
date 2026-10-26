@@ -3,7 +3,7 @@ import html
 import json
 import uuid
 from urllib.parse import quote, unquote
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
@@ -81,6 +81,8 @@ EN = {
     "+ {n} autres tâches": "+ {n} more tasks",
     "À faire": "To do", "Terminées": "Done",
     "Supprimer la tâche": "Delete task",
+    "Ajouter à mon calendrier (.ics)": "Add to my calendar (.ics)",
+    "Télécharge un fichier à ouvrir avec Google Agenda, Apple Calendrier ou Outlook : la deadline du projet et ses tâches non terminées y sont ajoutées.": "Downloads a file to open with Google Calendar, Apple Calendar or Outlook: the project deadline and its unfinished tasks get added.",
 }
 
 
@@ -188,6 +190,11 @@ CSS = """
   box-shadow: 0 10px 24px -12px rgba(139,123,255,.9);
 }
 .stButton > button[data-testid="stBaseButton-primary"]:hover { filter: brightness(1.1); }
+.stDownloadButton > button {
+  border-radius: 12px; border: 1px solid var(--line); background: rgba(255,255,255,.05);
+  color: var(--text); font-weight: 600; transition: all .25s ease;
+}
+.stDownloadButton > button:hover { border-color: var(--accent); background: rgba(139,123,255,.14); color: #fff; transform: translateY(-1px); }
 .st-key-add_tile button {
   height: 100%; min-height: 200px; font-size: 1.15rem; border: 1.5px dashed rgba(139,123,255,.55);
   background: rgba(139,123,255,.05); border-radius: 22px;
@@ -589,6 +596,32 @@ def board():
             st.caption(tr("+ {n} autres tâches").format(n=len(mine_all) - 10))
 
 
+def make_ics(p):
+    def e(x):
+        return str(x).replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+    def event(uid_, day, summary, desc):
+        d = parse(day)
+        return [
+            "BEGIN:VEVENT", f"UID:{uid_}@anti-gooner", f"DTSTAMP:{stamp}",
+            f"DTSTART;VALUE=DATE:{d:%Y%m%d}", f"DTEND;VALUE=DATE:{d + timedelta(days=1):%Y%m%d}",
+            f"SUMMARY:{e(summary)}", f"DESCRIPTION:{e(desc)}", "END:VEVENT",
+        ]
+
+    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//anti gooner//FR", "CALSCALE:GREGORIAN"]
+    lines += event(f"project-{p['id']}", p["due"], f"{tr('Deadline du projet')} : {p['name']}", p["desc"])
+    for t in p["tasks"]:
+        if not t["done"]:
+            lines += event(
+                f"task-{t['id']}", t["due"], f"{p['name']} : {t['title']}",
+                f"{tr('Responsable')} : {tr(t['owner'])}",
+            )
+    lines.append("END:VCALENDAR")
+    return "\r\n".join(lines) + "\r\n"
+
+
 def task_status(t):
     if t["done"]:
         return "done"
@@ -651,6 +684,15 @@ def project_view(p):
         )
     if p.get("owner_id") == me()["id"] and c3.button(tr("Supprimer"), key="del_project", use_container_width=True):
         confirm_delete(p["id"])
+    c4.download_button(
+        tr("Ajouter à mon calendrier (.ics)"),
+        data=make_ics(p),
+        file_name=f"{''.join(ch if ch.isalnum() else '_' for ch in p['name'])}.ics",
+        mime="text/calendar",
+        on_click="ignore",
+        use_container_width=True,
+        help=tr("Télécharge un fichier à ouvrir avec Google Agenda, Apple Calendrier ou Outlook : la deadline du projet et ses tâches non terminées y sont ajoutées."),
+    )
 
     locked = False
 
