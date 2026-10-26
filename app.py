@@ -554,9 +554,9 @@ def sync_google_calendar():
 
             if event_id:
                 try:
-                    service.events().update(
+                    gcal_exec(service.events().update(
                         calendarId="primary", eventId=event_id, body=event
-                    ).execute()
+                    ))
                     updated += 1
                 except HttpError as exc:
                     if exc.resp.status != 404:
@@ -566,14 +566,14 @@ def sync_google_calendar():
             if not event_id:
                 event["id"] = stable_id
                 try:
-                    service.events().insert(calendarId="primary", body=event).execute()
+                    gcal_exec(service.events().insert(calendarId="primary", body=event))
                     created += 1
                 except HttpError as exc:
                     if exc.resp.status != 409:
                         raise
-                    service.events().update(
+                    gcal_exec(service.events().update(
                         calendarId="primary", eventId=stable_id, body=event
-                    ).execute()
+                    ))
                     updated += 1
                 event_id = stable_id
 
@@ -590,6 +590,7 @@ def sync_google_calendar():
         except Exception as exc:
             failed += 1
             errors.append(f"{item.get('summary', entity_id)} : {type(exc).__name__}: {exc}")
+        time.sleep(0.1)
 
     # Supprime les événements devenus inutiles seulement si leur suppression réussit.
     for key, event_id in existing.items():
@@ -597,7 +598,7 @@ def sync_google_calendar():
             continue
         try:
             try:
-                service.events().delete(calendarId="primary", eventId=event_id).execute()
+                gcal_exec(service.events().delete(calendarId="primary", eventId=event_id))
             except HttpError as exc:
                 if exc.resp.status != 404:
                     raise
@@ -642,13 +643,6 @@ def save():
     except Exception:
         st.toast(tr("Sauvegarde impossible, réessaie dans un instant."), icon="⚠️")
         return
-
-    # La sauvegarde principale reste valide même si Google Calendar est indisponible.
-    try:
-        if calendar_connection():
-            sync_google_calendar()
-    except Exception:
-        st.toast("Projet sauvegardé, mais la synchronisation Google Calendar a échoué.", icon="⚠️")
 
 
 # ---------- Comptes (connexion Google via st.login) ----------
@@ -784,12 +778,7 @@ def delete_project(pid):
         return
     st.session_state.projects = [p for p in st.session_state.projects if p["id"] != pid]
     st.session_state.open = None
-    try:
-        if calendar_connection():
-            sync_google_calendar()
-    except Exception:
-        st.toast("Projet supprimé, mais son calendrier n'a pas pu être synchronisé.", icon="⚠️")
-
+    
 
 def add_member(pid):
     name = st.session_state.get("new_member")
@@ -1215,9 +1204,13 @@ banner()
 # Bouton principal visible même si la barre latérale est repliée.
 try:
     _calendar_connection = calendar_connection()
-except Exception:
-    _calendar_connection = None
-if _calendar_connection:
+    _cal_err = None
+except Exception as exc:
+    _calendar_connection, _cal_err = None, exc
+
+if _cal_err:
+    st.error(f"Lecture de google_calendar_connections impossible : {type(_cal_err).__name__}: {_cal_err}")
+elif _calendar_connection:
     if st.button("📅 Synchroniser Google Calendar", key="calendar_sync_main"):
         try:
             _report = sync_google_calendar()
@@ -1227,9 +1220,12 @@ if _calendar_connection:
             )
             if _report["failed"]:
                 st.warning(f"{_report['failed']} élément(s) en échec sur {_report['target']} éléments.")
-                for _message in _report["errors"][:8]:
-                    st.caption(_message)
+            for _message in _report["errors"][:8]:
+                st.caption(_message)
         except Exception as _exc:
+            st.error(f"Synchronisation impossible : {type(_exc).__name__}: {_exc}")
+else:
+    st.info("Google Calendar non connecté : utilise le bouton dans la barre latérale.")
             st.error(f"Synchronisation impossible : {type(_exc).__name__}: {_exc}")
 current = get_project(st.session_state.open) if st.session_state.open else None
 if current:
