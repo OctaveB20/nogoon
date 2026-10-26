@@ -78,6 +78,7 @@ EN = {
     "Prénom trop court.": "First name too short.",
     "Création impossible, réessaie dans un instant.": "Could not create the account, try again in a moment.",
     "Enregistrer": "Save",
+    "+ {n} autres tâches": "+ {n} more tasks",
 }
 
 
@@ -189,21 +190,30 @@ CSS = """
 /* Sidebar : avancement des projets */
 [data-testid="stSidebar"] { background: rgba(22,24,48,.65); border-right: 1px solid var(--line); backdrop-filter: blur(14px); }
 .side-title { font-family: 'Bricolage Grotesque', sans-serif; font-weight: 700; font-size: 1.4rem; letter-spacing: -0.02em; color: var(--text); margin: .4rem 0 1.1rem; }
-.ring-row { display: flex; align-items: center; gap: .9rem; padding: .7rem .8rem; margin-bottom: .6rem; border-radius: 18px; background: rgba(255,255,255,.04); border: 1px solid var(--line); }
+.ring-row { display: flex; align-items: center; gap: .9rem; padding: .7rem .8rem; margin-bottom: 0; border-radius: 18px; transition: all .25s ease; background: rgba(255,255,255,.04); border: 1px solid var(--line); }
 .ring-row.active { border-color: rgba(139,123,255,.55); background: rgba(139,123,255,.09); }
 .ring-row svg { flex: none; }
 .ring-fg { transition: stroke-dasharray .8s ease; }
 .ring-name { font-weight: 700; color: var(--text); font-size: .95rem; line-height: 1.2; }
 .ring-sub { color: var(--muted); font-size: .8rem; margin-top: .15rem; }
 .by { color: var(--muted); font-size: .76rem; margin-top: .1rem; }
+
+/* Projets cliquables dans la sidebar : le bouton est invisible et couvre toute la carte */
+[class*="st-key-navc_"] { position: relative; margin-bottom: .6rem; }
+[class*="st-key-navc_"] [data-testid="stElementContainer"]:has(button) { position: absolute; inset: 0; z-index: 3; }
+[class*="st-key-navc_"] .stButton, [class*="st-key-navc_"] .stButton > button { width: 100%; height: 100%; min-height: 0; }
+[class*="st-key-navc_"] .stButton > button { opacity: 0; cursor: pointer; }
+[class*="st-key-navc_"]:hover .ring-row { border-color: rgba(139,123,255,.55); background: rgba(139,123,255,.09); transform: translateX(3px); }
 .mt-row { display: flex; align-items: center; gap: .8rem; padding: .7rem 1rem; margin-bottom: .5rem; border-radius: 14px; background: rgba(255,255,255,.04); border: 1px solid var(--line); }
 .mt-row .t-title { flex: 1; }
 
 /* Sélecteur de langue */
 .st-key-lang [role="radiogroup"] { gap: .35rem; justify-content: flex-end; }
-.st-key-lang label { background: rgba(255,255,255,.05); border: 1px solid var(--line); border-radius: 999px; padding: .15rem .85rem; transition: all .25s ease; cursor: pointer; }
-.st-key-lang label:hover { border-color: rgba(139,123,255,.5); }
-.st-key-lang label:has(input:checked) { background: rgba(139,123,255,.24); border-color: rgba(139,123,255,.65); }
+.st-key-lang label { background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.28); border-radius: 999px; padding: .2rem .95rem; transition: all .25s ease; cursor: pointer; }
+.st-key-lang label p, .st-key-lang label div { color: #ECEBFF !important; font-weight: 700; font-size: .85rem; }
+.st-key-lang label:hover { border-color: rgba(139,123,255,.85); }
+.st-key-lang label:has(input:checked) { background: linear-gradient(135deg, #8B7BFF, #6A58F0); border-color: transparent; box-shadow: 0 8px 20px -10px rgba(139,123,255,.9); }
+.st-key-lang label:has(input:checked) p, .st-key-lang label:has(input:checked) div { color: #fff !important; }
 .st-key-lang label > div:first-child { display: none; }
 [data-testid="stForm"] { border: none; padding: 0; }
 .stFormSubmitButton > button {
@@ -537,10 +547,11 @@ def board():
             '<div class="empty">' + tr("Aucun projet pour l'instant. Clique sur le + pour créer le premier.") + "</div>",
             unsafe_allow_html=True,
         )
-    mine = sorted(
-        ((p, t) for p in projects for t in p["tasks"] if not t["done"] and t["owner"] == me()["name"]),
-        key=lambda x: x[1]["due"],
+    mine_all = sorted(
+        ((p, t) for p in projects for t in p["tasks"] if not t["done"] and t["owner"] in (me()["name"], "Tout le monde")),
+        key=lambda x: (x[1]["due"], x[0]["name"]),
     )
+    mine = mine_all[:10]
     if mine:
         st.markdown(
             '<div class="side-title" style="margin-top:2.2rem">' + tr("Mes tâches") + "</div>", unsafe_allow_html=True
@@ -552,6 +563,8 @@ def board():
                 f'{due_badge(t["due"])}</div>',
                 unsafe_allow_html=True,
             )
+        if len(mine_all) > 10:
+            st.caption(tr("+ {n} autres tâches").format(n=len(mine_all) - 10))
 
 
 def project_view(p):
@@ -667,7 +680,9 @@ def sidebar():
         if not projects:
             st.caption(tr("L'avancement de chaque projet apparaîtra ici."))
         for p in projects:
-            st.markdown(ring(p, p["id"] == st.session_state.open), unsafe_allow_html=True)
+            with st.container(key=f"navc_{p['id']}"):
+                st.markdown(ring(p, p["id"] == st.session_state.open), unsafe_allow_html=True)
+                st.button(p["name"], key=f"go_{p['id']}", on_click=set_open, args=(p["id"],))
         st.markdown(
             '<div class="side-title" style="font-size:1.05rem;margin-top:1.8rem">' + tr("Sauvegarde") + "</div>",
             unsafe_allow_html=True,
