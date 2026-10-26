@@ -1,10 +1,14 @@
-
 import hashlib
-import secrets as py_secrets
+import hmac
+import html
+import json
 import os
+import secrets as py_secrets
 import time
+import uuid
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 
-os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
 import requests
 import streamlit as st
 
@@ -15,17 +19,8 @@ from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-import hmac
-import html
-import json
-import uuid
-from urllib.parse import quote, unquote
-from datetime import date, datetime, timedelta, timezone
-from pathlib import Path
-
-import requests
-import streamlit as st
-import streamlit.components.v1 as components
+# Évite l'erreur "Scope has changed" quand Google renvoie des scopes supplémentaires.
+os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
 
 st.set_page_config(page_title="anti gooner", page_icon="🎯", layout="wide", initial_sidebar_state="expanded")
 
@@ -327,8 +322,14 @@ def rest(method, path, headers=None, **kw):
         method, f"{URL}/rest/v1/{path}",
         headers={**H, "Content-Type": "application/json", **(headers or {})}, timeout=10, **kw,
     )
-    r.raise_for_status()
+    if not r.ok:
+        # Montre le vrai message d'erreur de Supabase (table manquante, RLS, etc.)
+        raise RuntimeError(f"Supabase {r.status_code} sur {path} : {r.text[:300]}")
     return r.json() if r.content else None
+
+
+def me():
+    return st.session_state.user
 
 
 # ---------- Google Calendar OAuth & synchronisation ----------
@@ -353,6 +354,17 @@ def calendar_client_config():
             "redirect_uris": [calendar_redirect_uri()],
         }
     }
+
+
+def calendar_flow(state):
+    # autogenerate_code_verifier=False : le Flow est recréé après la redirection,
+    # donc le code_verifier PKCE serait perdu et fetch_token échouerait.
+    flow = Flow.from_client_config(
+        calendar_client_config(), scopes=CALENDAR_SCOPES, state=state,
+        autogenerate_code_verifier=False,
+    )
+    flow.redirect_uri = calendar_redirect_uri()
+    return flow
 
 
 def calendar_fernet():
@@ -383,8 +395,7 @@ def start_calendar_oauth():
         },
         headers={"Prefer": "return=minimal"},
     )
-    flow = Flow.from_client_config(     calendar_client_config(), scopes=CALENDAR_SCOPES, state=state,     autogenerate_code_verifier=False, )
-    flow.redirect_uri = calendar_redirect_uri()
+    flow = calendar_flow(state)
     url, _ = flow.authorization_url(
         access_type="offline", include_granted_scopes="true", prompt="consent"
     )
@@ -395,7 +406,7 @@ def handle_calendar_callback():
     params = st.query_params
     error = params.get("error")
     if error:
-        st.session_state["calendar_notice"] = "Autorisation Google Calendar refusée ou annulée."
+        st.session_state["calendar_notice_err"] = "Autorisation Google Calendar refusée ou annulée."
         st.session_state.pop("calendar_auth_url", None)
         st.query_params.clear()
         st.rerun()
@@ -416,13 +427,12 @@ def handle_calendar_callback():
         },
     )
     if not valid_states:
-        st.session_state["calendar_notice"] = "Demande Google expirée ou invalide. Recommence la connexion."
+        st.session_state["calendar_notice_err"] = "Demande Google expirée ou invalide. Recommence la connexion."
         st.session_state.pop("calendar_auth_url", None)
         st.query_params.clear()
         st.rerun()
 
-    flow = Flow.from_client_config(     calendar_client_config(), scopes=CALENDAR_SCOPES, state=state,     autogenerate_code_verifier=False, )
-    flow.redirect_uri = calendar_redirect_uri()
+    flow = calendar_flow(state)
     flow.fetch_token(code=code)
     creds = flow.credentials
 
@@ -485,7 +495,9 @@ def calendar_service():
         return None
     return build("calendar", "v3", credentials=creds, cache_discovery=False)
 
+
 def gcal_exec(request, tries=5):
+    """Exécute une requête Google avec nouvel essai en cas de limite de débit."""
     for i in range(tries):
         try:
             return request.execute()
@@ -495,6 +507,7 @@ def gcal_exec(request, tries=5):
                 time.sleep(0.5 * 2 ** i)
                 continue
             raise
+
 
 def sync_google_calendar():
     """Synchronise les deadlines et renvoie un bilan détaillé."""
@@ -571,6 +584,8 @@ def sync_google_calendar():
                 except HttpError as exc:
                     if exc.resp.status != 409:
                         raise
+                    # L'événement existe déjà (ou a été supprimé : on le ressuscite).
+                    event["status"] = "confirmed"
                     gcal_exec(service.events().update(
                         calendarId="primary", eventId=stable_id, body=event
                     ))
@@ -600,7 +615,7 @@ def sync_google_calendar():
             try:
                 gcal_exec(service.events().delete(calendarId="primary", eventId=event_id))
             except HttpError as exc:
-                if exc.resp.status != 404:
+                if exc.resp.status not in (404, 410):
                     raise
             rest("DELETE", "google_calendar_events", params={
                 "user_id": f"eq.{user_id}",
@@ -611,6 +626,7 @@ def sync_google_calendar():
         except Exception as exc:
             failed += 1
             errors.append(f"Suppression {key[0]} {key[1]} : {type(exc).__name__}: {exc}")
+        time.sleep(0.1)
 
     return {
         "created": created, "updated": updated, "removed": removed,
@@ -618,8 +634,23 @@ def sync_google_calendar():
     }
 
 
-def me():
-    return st.session_state.user
+def show_sync_report(report, prefix="Google Calendar"):
+    st.success(
+        f"{prefix} : {report['created']} créés, "
+        f"{report['updated']} mis à jour, {report['removed']} supprimés."
+    )
+    if report["failed"]:
+        st.warning(f"{report['failed']} élément(s) en échec sur {report['target']} à synchroniser.")
+    for message in report["errors"][:8]:
+        st.caption(message)
+
+
+def run_sync(prefix="Google Calendar"):
+    with st.spinner("Synchronisation en cours…"):
+        try:
+            show_sync_report(sync_google_calendar(), prefix)
+        except Exception as exc:
+            st.error(f"Synchronisation impossible : {type(exc).__name__}: {exc}")
 
 
 def profiles():
@@ -642,7 +673,6 @@ def save():
             rest("POST", "projects", json=rows, headers={"Prefer": "resolution=merge-duplicates,return=minimal"})
     except Exception:
         st.toast(tr("Sauvegarde impossible, réessaie dans un instant."), icon="⚠️")
-        return
 
 
 # ---------- Comptes (connexion Google via st.login) ----------
@@ -778,7 +808,7 @@ def delete_project(pid):
         return
     st.session_state.projects = [p for p in st.session_state.projects if p["id"] != pid]
     st.session_state.open = None
-    
+
 
 def add_member(pid):
     name = st.session_state.get("new_member")
@@ -1105,7 +1135,7 @@ def ring(p, active):
     )
 
 
-def sidebar():
+def sidebar(calendar_connection_row, calendar_error):
     with st.sidebar:
         st.markdown('<div class="side-title">' + tr("Avancement") + "</div>", unsafe_allow_html=True)
         projects = sorted(st.session_state.projects, key=lambda p: p["due"])
@@ -1129,30 +1159,13 @@ def sidebar():
         )
         st.caption(tr("Connecté : {name}").format(name=me()["name"]))
         st.markdown('<div class="side-title" style="font-size:1.05rem;margin-top:1.4rem">Google Calendar</div>', unsafe_allow_html=True)
-        try:
-            connection = calendar_connection()
-        except Exception:
-            connection = None
-            st.caption("Impossible de lire la connexion Google Calendar. Vérifie les tables Supabase.")
 
-        if connection:
-            st.caption(f"Compte : {connection.get('connected_email') or 'Google'}")
+        if calendar_error:
+            st.error(f"Lecture de google_calendar_connections impossible : {calendar_error}")
+        elif calendar_connection_row:
+            st.caption(f"Compte : {calendar_connection_row.get('connected_email') or 'Google'}")
             if st.button("Synchroniser maintenant", key="calendar_sync", use_container_width=True):
-                try:
-                    report = sync_google_calendar()
-                    st.success(
-                        f"Google Calendar : {report['created']} créés, "
-                        f"{report['updated']} mis à jour, {report['removed']} supprimés."
-                    )
-                    if report["failed"]:
-                        st.warning(f"{report['failed']} élément(s) en échec sur {report['target']} éléments à synchroniser.")
-                        for message in report["errors"][:8]:
-                            st.caption(message)
-                    elif report["errors"]:
-                        for message in report["errors"][:8]:
-                            st.caption(message)
-                except Exception as exc:
-                    st.error(f"Synchronisation impossible : {type(exc).__name__}: {exc}")
+                run_sync()
             if st.button("Déconnecter Calendar", key="calendar_disconnect", use_container_width=True):
                 st.session_state["calendar_disconnect_confirm"] = True
             if st.session_state.get("calendar_disconnect_confirm"):
@@ -1187,10 +1200,13 @@ try:
 except Exception as exc:
     st.session_state.pop("calendar_auth_url", None)
     st.query_params.clear()
-    st.error(f"Erreur Google Calendar : {exc}")
+    st.error(f"Erreur Google Calendar : {type(exc).__name__}: {exc}")
 notice = st.session_state.pop("calendar_notice", None)
 if notice:
     st.success(notice)
+notice_err = st.session_state.pop("calendar_notice_err", None)
+if notice_err:
+    st.error(notice_err)
 if "open" not in st.session_state:
     st.session_state.open = None
 try:
@@ -1199,34 +1215,26 @@ try:
 except Exception:
     st.error(tr("Impossible de joindre la base de données (projet Supabase en pause, ou URL / clé incorrectes). Tes données ne sont pas perdues."))
     st.stop()
-sidebar()
-banner()
-# Bouton principal visible même si la barre latérale est repliée.
+
+# État de la connexion Google Calendar (lu une seule fois par exécution)
 try:
-    _calendar_connection = calendar_connection()
+    _cal_row = calendar_connection()
     _cal_err = None
 except Exception as exc:
-    _calendar_connection, _cal_err = None, exc
+    _cal_row, _cal_err = None, f"{type(exc).__name__}: {exc}"
 
+sidebar(_cal_row, _cal_err)
+banner()
+
+# Bloc toujours visible, même si la barre latérale est repliée.
 if _cal_err:
-    st.error(f"Lecture de google_calendar_connections impossible : {type(_cal_err).__name__}: {_cal_err}")
-elif _calendar_connection:
+    st.error(f"Lecture de google_calendar_connections impossible : {_cal_err}")
+elif _cal_row:
     if st.button("📅 Synchroniser Google Calendar", key="calendar_sync_main"):
-        try:
-            _report = sync_google_calendar()
-            st.success(
-                f"Calendrier synchronisé : {_report['created']} créés, "
-                f"{_report['updated']} mis à jour, {_report['removed']} supprimés."
-            )
-            if _report["failed"]:
-                st.warning(f"{_report['failed']} élément(s) en échec sur {_report['target']} éléments.")
-            for _message in _report["errors"][:8]:
-                st.caption(_message)
-        except Exception as _exc:
-            st.error(f"Synchronisation impossible : {type(_exc).__name__}: {_exc}")
+        run_sync("Calendrier synchronisé")
 else:
-    st.info("Google Calendar non connecté : utilise le bouton dans la barre latérale.")
-            st.error(f"Synchronisation impossible : {type(_exc).__name__}: {_exc}")
+    st.info("Google Calendar non connecté : utilise le bouton « Connecter Google Calendar » dans la barre latérale.")
+
 current = get_project(st.session_state.open) if st.session_state.open else None
 if current:
     project_view(current)
