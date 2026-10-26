@@ -328,6 +328,251 @@ def rest(method, path, headers=None, **kw):
     return r.json() if r.content else None
 
 
+# ---------- Google Calendar OAuth & synchronisation ----------
+CALENDAR_SCOPES = [
+    "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "openid",
+]
+
+
+def calendar_redirect_uri():
+    return st.secrets["GOOGLE_REDIRECT_URI"].strip()
+
+
+def calendar_client_config():
+    return {
+        "web": {
+            "client_id": st.secrets["GOOGLE_CLIENT_ID"],
+            "client_secret": st.secrets["GOOGLE_CLIENT_SECRET"],
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [calendar_redirect_uri()],
+        }
+    }
+
+
+def calendar_fernet():
+    return Fernet(st.secrets["GOOGLE_TOKEN_ENCRYPTION_KEY"].encode())
+
+
+def calendar_connection():
+    rows = rest(
+        "GET", "google_calendar_connections",
+        params={
+            "user_id": f"eq.{me()['id']}",
+            "select": "user_id,refresh_token_encrypted,connected_email,scopes",
+            "limit": "1",
+        },
+    )
+    return rows[0] if rows else None
+
+
+def start_calendar_oauth():
+    state = py_secrets.token_urlsafe(32)
+    now = datetime.now(timezone.utc)
+    rest(
+        "POST", "google_calendar_oauth_states",
+        json={
+            "state": state,
+            "user_id": me()["id"],
+            "expires_at": (now + timedelta(minutes=10)).isoformat(),
+        },
+        headers={"Prefer": "return=minimal"},
+    )
+    flow = Flow.from_client_config(calendar_client_config(), scopes=CALENDAR_SCOPES, state=state)
+    flow.redirect_uri = calendar_redirect_uri()
+    url, _ = flow.authorization_url(
+        access_type="offline", include_granted_scopes="true", prompt="consent"
+    )
+    st.session_state["calendar_auth_url"] = url
+
+
+def handle_calendar_callback():
+    params = st.query_params
+    error = params.get("error")
+    if error:
+        st.session_state["calendar_notice"] = "Autorisation Google Calendar refusée ou annulée."
+        st.session_state.pop("calendar_auth_url", None)
+        st.query_params.clear()
+        st.rerun()
+
+    code = params.get("code")
+    state = params.get("state")
+    if not code or not state:
+        return
+
+    valid_states = rest(
+        "GET", "google_calendar_oauth_states",
+        params={
+            "state": f"eq.{state}",
+            "user_id": f"eq.{me()['id']}",
+            "expires_at": "gt." + datetime.now(timezone.utc).isoformat(),
+            "select": "state",
+            "limit": "1",
+        },
+    )
+    if not valid_states:
+        st.session_state["calendar_notice"] = "Demande Google expirée ou invalide. Recommence la connexion."
+        st.session_state.pop("calendar_auth_url", None)
+        st.query_params.clear()
+        st.rerun()
+
+    flow = Flow.from_client_config(calendar_client_config(), scopes=CALENDAR_SCOPES, state=state)
+    flow.redirect_uri = calendar_redirect_uri()
+    flow.fetch_token(code=code)
+    creds = flow.credentials
+
+    oauth_service = build("oauth2", "v2", credentials=creds, cache_discovery=False)
+    google_email = oauth_service.userinfo().get().execute()["email"]
+
+    old = calendar_connection()
+    refresh_token = creds.refresh_token
+    if not refresh_token and old:
+        refresh_token = calendar_fernet().decrypt(
+            old["refresh_token_encrypted"].encode()
+        ).decode()
+    if not refresh_token:
+        raise RuntimeError(
+            "Google n'a pas renvoyé de jeton de renouvellement. Révoque l'accès existant à Anti Gooner dans ton compte Google, puis recommence."
+        )
+
+    encrypted = calendar_fernet().encrypt(refresh_token.encode()).decode()
+    rest(
+        "POST", "google_calendar_connections",
+        params={"on_conflict": "user_id"},
+        json={
+            "user_id": me()["id"],
+            "refresh_token_encrypted": encrypted,
+            "connected_email": google_email,
+            "scopes": CALENDAR_SCOPES,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        },
+        headers={"Prefer": "resolution=merge-duplicates,return=minimal"},
+    )
+    rest("DELETE", "google_calendar_oauth_states", params={"state": f"eq.{state}"})
+    st.session_state.pop("calendar_auth_url", None)
+    st.session_state["calendar_notice"] = f"Google Calendar connecté : {google_email}"
+    st.query_params.clear()
+    st.rerun()
+
+
+def calendar_credentials():
+    connection = calendar_connection()
+    if not connection:
+        return None
+    refresh_token = calendar_fernet().decrypt(
+        connection["refresh_token_encrypted"].encode()
+    ).decode()
+    creds = Credentials(
+        token=None,
+        refresh_token=refresh_token,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=st.secrets["GOOGLE_CLIENT_ID"],
+        client_secret=st.secrets["GOOGLE_CLIENT_SECRET"],
+        scopes=CALENDAR_SCOPES,
+    )
+    creds.refresh(Request())
+    return creds
+
+
+def calendar_service():
+    creds = calendar_credentials()
+    if creds is None:
+        return None
+    return build("calendar", "v3", credentials=creds, cache_discovery=False)
+
+
+def sync_google_calendar():
+    service = calendar_service()
+    if service is None:
+        raise RuntimeError("Connecte d'abord ton compte Google Calendar.")
+
+    user_id = me()["id"]
+    desired = {}
+    for project in st.session_state.projects:
+        desired[("project", str(project["id"]))] = {
+            "summary": f"Anti Gooner - Deadline : {project['name']}",
+            "description": project.get("desc", ""),
+            "due": project["due"],
+        }
+        for task in project.get("tasks", []):
+            if task.get("done"):
+                continue
+            desired[("task", str(task["id"]))] = {
+                "summary": f"{project['name']} : {task['title']}",
+                "description": f"Responsable : {task.get('owner', 'Tout le monde')}",
+                "due": task["due"],
+            }
+
+    rows = rest(
+        "GET", "google_calendar_events",
+        params={"user_id": f"eq.{user_id}", "select": "entity_type,entity_id,google_event_id"},
+    )
+    existing = {(r["entity_type"], r["entity_id"]): r["google_event_id"] for r in rows}
+
+    for key, item in desired.items():
+        entity_type, entity_id = key
+        event_id = existing.get(key)
+        # Google Calendar event IDs accept lowercase a-v and digits; SHA-256 hex fits.
+        stable_id = hashlib.sha256(f"{user_id}:{entity_type}:{entity_id}".encode()).hexdigest()
+        due = date.fromisoformat(item["due"])
+        event = {
+            "summary": item["summary"],
+            "description": item["description"],
+            "start": {"date": due.isoformat()},
+            "end": {"date": (due + timedelta(days=1)).isoformat()},
+        }
+
+        if event_id:
+            try:
+                service.events().update(calendarId="primary", eventId=event_id, body=event).execute()
+            except HttpError as exc:
+                if exc.resp.status != 404:
+                    raise
+                event_id = None
+
+        if not event_id:
+            event["id"] = stable_id
+            try:
+                service.events().insert(calendarId="primary", body=event).execute()
+            except HttpError as exc:
+                if exc.resp.status != 409:
+                    raise
+                service.events().update(calendarId="primary", eventId=stable_id, body=event).execute()
+            event_id = stable_id
+
+        rest(
+            "POST", "google_calendar_events",
+            params={"on_conflict": "user_id,entity_type,entity_id"},
+            json={
+                "user_id": user_id, "entity_type": entity_type,
+                "entity_id": entity_id, "google_event_id": event_id,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            },
+            headers={"Prefer": "resolution=merge-duplicates,return=minimal"},
+        )
+
+    # Remove events for completed/deleted tasks and deleted projects.
+    for key, event_id in existing.items():
+        if key in desired:
+            continue
+        try:
+            service.events().delete(calendarId="primary", eventId=event_id).execute()
+        except HttpError as exc:
+            if exc.resp.status != 404:
+                raise
+        rest(
+            "DELETE", "google_calendar_events",
+            params={
+                "user_id": f"eq.{user_id}",
+                "entity_type": f"eq.{key[0]}",
+                "entity_id": f"eq.{key[1]}",
+            },
+        )
+    return len(desired)
+
+
 def me():
     return st.session_state.user
 
@@ -352,6 +597,14 @@ def save():
             rest("POST", "projects", json=rows, headers={"Prefer": "resolution=merge-duplicates,return=minimal"})
     except Exception:
         st.toast(tr("Sauvegarde impossible, réessaie dans un instant."), icon="⚠️")
+        return
+
+    # La sauvegarde principale reste valide même si Google Calendar est indisponible.
+    try:
+        if calendar_connection():
+            sync_google_calendar()
+    except Exception:
+        st.toast("Projet sauvegardé, mais la synchronisation Google Calendar a échoué.", icon="⚠️")
 
 
 # ---------- Comptes (connexion Google via st.login) ----------
@@ -487,6 +740,11 @@ def delete_project(pid):
         return
     st.session_state.projects = [p for p in st.session_state.projects if p["id"] != pid]
     st.session_state.open = None
+    try:
+        if calendar_connection():
+            sync_google_calendar()
+    except Exception:
+        st.toast("Projet supprimé, mais son calendrier n'a pas pu être synchronisé.", icon="⚠️")
 
 
 def add_member(pid):
@@ -837,7 +1095,42 @@ def sidebar():
             use_container_width=True,
         )
         st.caption(tr("Connecté : {name}").format(name=me()["name"]))
-        st.button(tr("Se déconnecter"), key="logout", on_click=st.logout, use_container_width=True)
+        st.markdown('<div class="side-title" style="font-size:1.05rem;margin-top:1.4rem">Google Calendar</div>', unsafe_allow_html=True)
+        try:
+            connection = calendar_connection()
+        except Exception:
+            connection = None
+            st.caption("Impossible de lire la connexion Google Calendar. Vérifie les tables Supabase.")
+
+        if connection:
+            st.caption(f"Compte : {connection.get('connected_email') or 'Google'}")
+            if st.button("Synchroniser maintenant", key="calendar_sync", use_container_width=True):
+                try:
+                    count = sync_google_calendar()
+                    st.success(f"{count} événements synchronisés.")
+                except Exception as exc:
+                    st.error(f"Synchronisation impossible : {exc}")
+            if st.button("Déconnecter Calendar", key="calendar_disconnect", use_container_width=True):
+                st.session_state["calendar_disconnect_confirm"] = True
+            if st.session_state.get("calendar_disconnect_confirm"):
+                st.warning("La déconnexion arrête la synchronisation. Les événements existants resteront dans Google Calendar.")
+                if st.button("Confirmer la déconnexion", key="calendar_disconnect_yes", use_container_width=True):
+                    rest("DELETE", "google_calendar_connections", params={"user_id": f"eq.{me()['id']}"})
+                    rest("DELETE", "google_calendar_events", params={"user_id": f"eq.{me()['id']}"})
+                    st.session_state.pop("calendar_disconnect_confirm", None)
+                    st.rerun()
+        else:
+            if st.button("Connecter Google Calendar", key="calendar_connect", use_container_width=True):
+                try:
+                    start_calendar_oauth()
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Impossible de démarrer Google Calendar : {exc}")
+            auth_url = st.session_state.get("calendar_auth_url")
+            if auth_url:
+                st.link_button("Continuer vers Google", auth_url, use_container_width=True)
+
+        st.button("Se déconnecter", key="logout", on_click=st.logout, use_container_width=True)
 
 
 # ---------- Main ----------
@@ -846,6 +1139,15 @@ _, _lang_col = st.columns([5, 1])
 with _lang_col:
     st.radio("Langue / Language", ["FR", "EN"], horizontal=True, key="lang", label_visibility="collapsed")
 auth_gate()
+try:
+    handle_calendar_callback()
+except Exception as exc:
+    st.session_state.pop("calendar_auth_url", None)
+    st.query_params.clear()
+    st.error(f"Erreur Google Calendar : {exc}")
+notice = st.session_state.pop("calendar_notice", None)
+if notice:
+    st.success(notice)
 if "open" not in st.session_state:
     st.session_state.open = None
 try:
