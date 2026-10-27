@@ -228,46 +228,21 @@ CSS = """
 .ring-sub { color: var(--muted); font-size: .8rem; margin-top: .15rem; }
 .by { color: var(--muted); font-size: .76rem; margin-top: .1rem; }
 
-/* Projets cliquables dans la sidebar : superposition du bouton sur toute la carte */
-[class*="st-key-navc_"] {
-  position: relative;
-  display: grid;
-  margin-bottom: .6rem;
-  isolation: isolate;
-}
-[class*="st-key-navc_"] > [data-testid="stElementContainer"] {
-  grid-area: 1 / 1;
-  min-width: 0;
-}
+/* Projets cliquables dans la sidebar : le bouton invisible recouvre toute la carte */
+[class*="st-key-navc_"] { position: relative; margin-bottom: .6rem; gap: 0 !important; }
 [class*="st-key-navc_"] [data-testid="stElementContainer"]:has(button) {
-  position: relative;
-  z-index: 3;
-  align-self: stretch;
-  min-height: 100%;
+  position: absolute; inset: 0; z-index: 3; margin: 0; width: 100%; height: 100%;
 }
 [class*="st-key-navc_"] [data-testid="stElementContainer"]:has(button) .stButton,
 [class*="st-key-navc_"] [data-testid="stElementContainer"]:has(button) .stButton > button {
-  width: 100%;
-  height: 100%;
-  min-height: 100%;
+  width: 100%; height: 100%; min-height: 0;
 }
-[class*="st-key-navc_"] .stButton > button {
-  opacity: 0;
-  cursor: pointer;
-  padding: 0;
-  border: 0;
-}
+[class*="st-key-navc_"] .stButton > button { opacity: 0; cursor: pointer; padding: 0; border: 0; }
 [class*="st-key-navc_"]:hover .ring-row,
 [class*="st-key-navc_"]:focus-within .ring-row {
-  border-color: rgba(139,123,255,.7);
-  background: rgba(139,123,255,.12);
-  transform: translateX(3px);
+  border-color: rgba(139,123,255,.7); background: rgba(139,123,255,.12); transform: translateX(3px);
 }
-[class*="st-key-navc_"] .stButton > button:focus-visible {
-  opacity: .01;
-  outline: 2px solid #8B7BFF;
-  outline-offset: -3px;
-}
+[class*="st-key-navc_"] .stButton > button:focus-visible { opacity: .01; outline: 2px solid #8B7BFF; outline-offset: -3px; }
 .mt-row { display: flex; align-items: center; gap: .8rem; padding: .7rem 1rem; margin-bottom: .5rem; border-radius: 14px; background: rgba(255,255,255,.04); border: 1px solid var(--line); }
 .mt-row .t-title { flex: 1; }
 
@@ -297,6 +272,26 @@ CSS = """
   font-weight: 600; box-shadow: 0 10px 24px -12px rgba(139,123,255,.9); transition: all .25s ease;
 }
 .stFormSubmitButton > button:hover { filter: brightness(1.1); transform: translateY(-1px); }
+/* Tablette : 2 projets par ligne, espacements réduits */
+@media (max-width: 1024px) {
+  .block-container { padding-left: 1.2rem; padding-right: 1.2rem; padding-top: 1.5rem; }
+  .st-key-board [data-testid="stHorizontalBlock"] { flex-wrap: wrap !important; gap: 1rem !important; }
+  .st-key-board [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+  .st-key-board [data-testid="stHorizontalBlock"] > [data-testid="column"] {
+    flex: 1 1 calc(50% - 1rem) !important; width: calc(50% - 1rem) !important; min-width: calc(50% - 1rem) !important;
+  }
+  .st-key-add_tile button { min-height: 120px; }
+  [class*="st-key-card_"] { padding: 1.1rem 1.2rem; }
+}
+/* Mobile : 1 projet par ligne */
+@media (max-width: 640px) {
+  .st-key-board [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+  .st-key-board [data-testid="stHorizontalBlock"] > [data-testid="column"] {
+    flex: 1 1 100% !important; width: 100% !important; min-width: 100% !important;
+  }
+  .st-key-add_tile button { min-height: 80px; }
+  [class*="st-key-task_"] [data-testid="stVerticalBlock"] { gap: .4rem; }
+}
 </style>
 """
 
@@ -934,15 +929,16 @@ def card(p):
 def board():
     projects = sorted(st.session_state.projects, key=lambda p: p["due"])
     items = ["add"] + projects
-    for r in range(0, len(items), 3):
-        cols = st.columns(3, gap="medium")
-        for col, item in zip(cols, items[r : r + 3]):
-            with col:
-                if item == "add":
-                    if st.button(tr("+  Nouveau projet"), key="add_tile", use_container_width=True):
-                        new_project()
-                else:
-                    card(item)
+    with st.container(key="board"):
+        for r in range(0, len(items), 3):
+            cols = st.columns(3, gap="medium")
+            for col, item in zip(cols, items[r : r + 3]):
+                with col:
+                    if item == "add":
+                        if st.button(tr("+  Nouveau projet"), key="add_tile", use_container_width=True):
+                            new_project()
+                    else:
+                        card(item)
     if not projects:
         st.markdown(
             '<div class="empty">' + tr("Aucun projet pour l'instant. Clique sur le + pour créer le premier.") + "</div>",
@@ -1244,15 +1240,6 @@ elif _cal_row:
         run_sync("Calendrier synchronisé")
 else:
     st.info("Google Calendar non connecté : utilise le bouton « Connecter Google Calendar » dans la barre latérale.")
-
-with st.expander("Diagnostic Google Calendar"):
-    st.write({
-        "user_id": me()["id"],
-        "connexion_trouvee": bool(_cal_row),
-        "erreur_lecture": _cal_err,
-        "redirect_uri": st.secrets.get("GOOGLE_REDIRECT_URI"),
-        "params_url": list(st.query_params.keys()),
-    })
 
 current = get_project(st.session_state.open) if st.session_state.open else None
 if current:
