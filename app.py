@@ -451,17 +451,17 @@ def handle_calendar_callback():
         )
 
     encrypted = calendar_fernet().encrypt(refresh_token.encode()).decode()
-        saved_rows = rest(
-            "POST", "google_calendar_connections",
-            params={"on_conflict": "user_id"},
-            json={
-                    "user_id": me()["id"],
-                    "refresh_token_encrypted": encrypted,
-                    "connected_email": google_email,
-                    "scopes": CALENDAR_SCOPES,
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-            },
-            headers={"Prefer": "resolution=merge-duplicates,return=representation"},
+    saved_rows = rest(
+        "POST", "google_calendar_connections",
+        params={"on_conflict": "user_id"},
+        json={
+            "user_id": me()["id"],
+            "refresh_token_encrypted": encrypted,
+            "connected_email": google_email,
+            "scopes": CALENDAR_SCOPES,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        },
+        headers={"Prefer": "resolution=merge-duplicates,return=representation"},
     )
     if not saved_rows:
         raise RuntimeError("Écriture dans google_calendar_connections sans effet (RLS ou contrainte ?)")
@@ -1236,6 +1236,7 @@ elif _cal_row:
         run_sync("Calendrier synchronisé")
 else:
     st.info("Google Calendar non connecté : utilise le bouton « Connecter Google Calendar » dans la barre latérale.")
+
 with st.expander("Diagnostic Google Calendar"):
     st.write({
         "user_id": me()["id"],
