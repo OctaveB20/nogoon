@@ -11,6 +11,7 @@ from pathlib import Path
 
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 
 from cryptography.fernet import Fernet
 from google.auth.transport.requests import Request
@@ -1186,7 +1187,14 @@ def sidebar(calendar_connection_row, calendar_error):
                     st.error(f"Impossible de démarrer Google Calendar : {exc}")
             auth_url = st.session_state.get("calendar_auth_url")
             if auth_url:
-                st.link_button("Continuer vers Google", auth_url, use_container_width=True)
+                # target="_top" : ouvre Google dans le même onglet (st.link_button ouvre un nouvel onglet)
+                components.html(
+                    f'''<a href="{html.escape(auth_url, quote=True)}" target="_top"
+                    style="display:block;text-align:center;padding:.5rem;border-radius:12px;
+                    background:linear-gradient(135deg,#8B7BFF,#6A58F0);color:#fff;
+                    font-family:sans-serif;font-weight:600;text-decoration:none">Continuer vers Google</a>''',
+                    height=50,
+                )
 
         st.button("Se déconnecter", key="logout", on_click=st.logout, use_container_width=True)
 
