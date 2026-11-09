@@ -506,25 +506,134 @@ CSS = """
 .st-key-main_navigation [role="radio"] svg { display:none !important; }
 .st-key-main_navigation [role="radiogroup"] label { gap:0 !important; }
 
-/* Fenêtres de création et modification : contraste cohérent avec la palette du thème. */
-[data-testid="stDialog"] div[role="dialog"] { color:#9DB0FF !important; }
-[data-testid="stDialog"] [data-testid="stMarkdownContainer"] p,
-[data-testid="stDialog"] [data-testid="stCaptionContainer"],
-[data-testid="stDialog"] [data-testid="stWidgetLabel"] p,
-[data-testid="stDialog"] label { color:#AFC0FF !important; }
-[data-testid="stDialog"] h1, [data-testid="stDialog"] h2,
-[data-testid="stDialog"] h3 { color:#F0F2FF !important; }
-[data-testid="stDialog"] input, [data-testid="stDialog"] textarea,
-[data-testid="stDialog"] [data-baseweb="select"] * { color:#E8ECFF !important; }
+/* Dialogues : amélioration de la hiérarchie visuelle et des espacements.
+   Les couleurs restent celles du thème Streamlit, comme dans la version précédente. */
+[data-testid="stDialog"] div[role="dialog"] { font-family:'Manrope',sans-serif; }
+[data-testid="stDialog"] [data-testid="stMarkdownContainer"] h1,
+[data-testid="stDialog"] [data-testid="stMarkdownContainer"] h2,
+[data-testid="stDialog"] [data-testid="stMarkdownContainer"] h3 {
+  font-family:'Bricolage Grotesque',sans-serif; letter-spacing:-.025em;
+}
+[data-testid="stDialog"] [data-testid="stTextInput"],
+[data-testid="stDialog"] [data-testid="stTextArea"],
+[data-testid="stDialog"] [data-testid="stDateInput"],
+[data-testid="stDialog"] [data-testid="stSelectbox"],
+[data-testid="stDialog"] [data-testid="stMultiSelect"] { margin-bottom:.45rem; }
 [data-testid="stDialog"] [data-testid="stTextInput"] input,
 [data-testid="stDialog"] [data-testid="stTextArea"] textarea,
 [data-testid="stDialog"] [data-testid="stDateInput"] input {
-  background:rgba(157,176,255,.055) !important; border:1px solid rgba(157,176,255,.22) !important;
+  border-radius:13px; min-height:2.8rem;
 }
-.dialog-intro { color:#C8D2FF !important; background:linear-gradient(90deg,rgba(139,123,255,.18),rgba(157,176,255,.025)) !important; }
+[data-testid="stDialog"] [data-testid="stForm"] { gap:.65rem; }
+[data-testid="stDialog"] [data-testid="stFormSubmitButton"] button,
+[data-testid="stDialog"] .stButton button { min-height:2.8rem; border-radius:13px; font-weight:750; }
+[data-testid="stDialog"] .dialog-intro {
+  font-family:'Bricolage Grotesque',sans-serif; font-size:.96rem;
+  padding:.85rem 1rem; margin:1rem 0 .7rem; border-radius:0 14px 14px 0;
+}
+[data-testid="stDialog"] [data-testid="stHorizontalBlock"] { gap:1rem; }
 
+/* Navigation par segmented control : plus de bouton radio donc aucune coche. */
+
+.st-key-main_navigation [data-testid="stSegmentedControl"] {
+  width:100%; padding:.35rem; border:1px solid rgba(139,123,255,.22);
+  border-radius:18px; background:rgba(22,24,48,.88);
+}
+.st-key-main_navigation [data-testid="stSegmentedControl"] button {
+  min-height:3.35rem; border-radius:13px !important; font-size:1.08rem; font-weight:800;
+}
+.st-key-main_navigation [data-testid="stSegmentedControl"] button[aria-pressed="true"] {
+  background:linear-gradient(120deg,rgba(139,123,255,.42),rgba(255,143,163,.13)) !important;
+  box-shadow:inset 0 0 0 1px rgba(139,123,255,.4);
+}
+.st-key-workload_page .workload-period-label { text-align:center; color:#F0EEFF; font-weight:800; font-size:1.08rem; padding:.45rem; }
+.st-key-workload_page .workload-legend { display:flex; justify-content:center; gap:1.3rem; flex-wrap:wrap; margin:.25rem 0 1rem; color:#9DB0FF; font-size:.86rem; }
+.st-key-workload_page .workload-legend span:first-child { color:#CFC8FF; }
+.st-key-workload_page .workload-legend span:last-child { color:#5CE1C6; }
+.st-key-workload_page .workload-day-card { height:142px; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; padding:9px 5px 7px; border:1px solid rgba(157,176,255,.13); border-radius:14px; background:rgba(22,24,48,.78); }
+.st-key-workload_page .workload-day-card.selected { border-color:#8B7BFF; background:rgba(139,123,255,.13); }
+.st-key-workload_page .workload-day-total { font-size:.72rem; color:#E6E8FF; font-weight:800; margin-bottom:7px; }
+.st-key-workload_page .workload-bar-track { height:88px; width:25px; display:flex; flex-direction:column; justify-content:flex-end; background:rgba(255,255,255,.055); border-radius:8px; overflow:hidden; }
+.st-key-workload_page .workload-bar-done, .st-key-workload_page .workload-bar-open { width:100%; min-height:0; }
+.st-key-workload_page .workload-day-date { font-size:.72rem; color:#AFC0FF; margin-top:7px; }
+.st-key-workload_page .workload-month-weekday { text-align:center; color:#AFC0FF; font-size:.78rem; font-weight:800; padding:.35rem 0; }
+.st-key-workload_page .workload-month-cell { min-height:74px; padding:.4rem .3rem; margin-bottom:.25rem; border:1px solid rgba(157,176,255,.12); border-radius:11px; background:rgba(22,24,48,.72); display:flex; flex-direction:column; align-items:center; gap:.25rem; }
+.st-key-workload_page .workload-month-cell.selected { border-color:#8B7BFF; background:rgba(139,123,255,.18); }
+.st-key-workload_page .workload-month-cell.outside { opacity:.32; }
+.st-key-workload_page .workload-month-cell b { color:#E9E9FF; font-size:.86rem; }
+.st-key-workload_page .workload-month-cell span { color:#AFC0FF; font-size:.67rem; white-space:nowrap; }
+.st-key-workload_page .workload-month-dots { width:85%; display:flex; flex-direction:column; gap:2px; }
+.st-key-workload_page .workload-month-dots i { display:block; height:3px; border-radius:5px; }
+.st-key-workload_page .workload-month-cell + button { min-height:1.4rem; height:1.4rem; padding:0; margin-top:-.25rem; opacity:.0; }
+.st-key-workload_page .workload-selected-heading { margin:1rem 0 .5rem; color:#F0EEFF; font-weight:800; font-size:1rem; }
+.st-key-workload_page [class*="st-key-workload_task_"] {
+  display:flex; align-items:center; padding:.48rem .7rem !important; margin:.35rem 0 !important;
+  border:1px solid rgba(255,255,255,.08) !important; border-radius:14px !important; background:rgba(255,255,255,.04) !important;
+}
+.st-key-workload_page [class*="st-key-workload_task_"] [data-testid="stHorizontalBlock"] { gap:.55rem; }
+.st-key-workload_page [class*="st-key-workload_open_"] button {
+  background:transparent !important; border:0 !important; box-shadow:none !important; color:#ECEBFF !important;
+  text-align:left !important; padding:0 !important; font-weight:600 !important; min-height:1.8rem !important; justify-content:flex-start !important;
+}
+.st-key-workload_page [class*="st-key-workload_open_"] button:hover { color:#B9AEFF !important; transform:none !important; }
+.st-key-workload_page [class*="st-key-workload_task_completed_"] { border-left:3px solid #5CE1C6 !important; background:rgba(92,225,198,.055) !important; }
+.st-key-workload_page .workload-check-open { color:#8B7BFF; font-size:1.1rem; }
+.st-key-workload_page .workload-check-done { color:#5CE1C6; font-size:1.1rem; }
+.st-key-workload_page .workload-duration { color:#CFC8FF; font-weight:800; font-size:.82rem; white-space:nowrap; }
+.st-key-workload_page .workload-duration.done { color:#5CE1C6; }
+@media(max-width:700px) {
+  .st-key-workload_page .workload-month-cell { min-height:60px; }
+  .st-key-workload_page .workload-month-cell span { font-size:.58rem; }
+}
 </style>
 """
+
+
+CSS += r"""
+<style>
+/* Navigation principale : boutons simples, sans radio/segmented-control ni coche. */
+.st-key-nav_projects_main button, .st-key-nav_workload_main button {
+  min-height:4.6rem; border-radius:19px; font-size:1.18rem; font-weight:850; letter-spacing:-.02em;
+  border:1px solid rgba(157,176,255,.2); transition:all .2s ease;
+}
+.st-key-nav_projects_main button:hover, .st-key-nav_workload_main button:hover {
+  transform:translateY(-2px); border-color:rgba(139,123,255,.65);
+}
+/* Dans Workload, les conteneurs utilisent exactement les classes task_late/soon/ok/done du board. */
+.st-key-workload_page [class*="st-key-task_"] {
+  border-radius:16px !important; padding:.6rem 1rem .6rem 1.1rem !important;
+  border:1px solid var(--line) !important; border-left:4px solid rgba(255,255,255,.14) !important;
+  margin-bottom:.15rem !important; background:linear-gradient(160deg,rgba(255,255,255,.065),rgba(255,255,255,.02)) !important;
+  backdrop-filter:blur(12px); transition:transform .25s ease,border-color .25s ease,box-shadow .25s ease;
+}
+.st-key-workload_page [class*="st-key-task_late_"] { border-left-color:#FF8FA3 !important; background:linear-gradient(90deg,rgba(255,107,129,.10),rgba(255,255,255,.02) 45%) !important; }
+.st-key-workload_page [class*="st-key-task_soon_"] { border-left-color:#FFC46B !important; }
+.st-key-workload_page [class*="st-key-task_ok_"] { border-left-color:#5CE1C6 !important; }
+.st-key-workload_page [class*="st-key-task_done_"] { border-left-color:rgba(255,255,255,.14) !important; opacity:.6; }
+.st-key-workload_page [class*="st-key-task_done_"]:hover { opacity:1; }
+.st-key-workload_page [class*="st-key-workload_open_"] button {
+  width:auto !important; min-height:unset !important; padding:0 !important; border:0 !important;
+  border-radius:0 !important; background:transparent !important; box-shadow:none !important;
+  color:var(--text) !important; font-size:1rem !important; font-weight:600 !important; text-align:left !important;
+  justify-content:flex-start !important;
+}
+.st-key-workload_page [class*="st-key-workload_open_"] button:hover { color:#B9AEFF !important; transform:none !important; }
+.st-key-workload_page [class*="st-key-task_done_"] [class*="st-key-workload_open_"] button { color:var(--muted) !important; text-decoration:line-through; }
+/* Fenêtres d'ajout/édition : hiérarchie et composition plus soignées, sans forcer les couleurs de police. */
+[data-testid="stDialog"] div[role="dialog"] { padding:1.25rem 1.4rem 1.4rem; }
+[data-testid="stDialog"] .dialog-intro { margin:1.1rem 0 .8rem; padding:.8rem 1rem; border-radius:13px; }
+[data-testid="stDialog"] [data-testid="stTextInput"],
+[data-testid="stDialog"] [data-testid="stTextArea"],
+[data-testid="stDialog"] [data-testid="stDateInput"],
+[data-testid="stDialog"] [data-testid="stSelectbox"],
+[data-testid="stDialog"] [data-testid="stMultiSelect"] { margin:.25rem 0 .7rem; }
+[data-testid="stDialog"] [data-testid="stTextArea"] textarea { min-height:6rem; }
+[data-testid="stDialog"] [data-testid="stFormSubmitButton"] button,
+[data-testid="stDialog"] .stButton button { min-height:2.9rem; border-radius:14px; }
+</style>
+
+"""
+
 
 
 # ---------- Données ----------
@@ -1154,30 +1263,53 @@ def open_workload_project(pid):
 
 
 def _workload_task_row(item, section_key="list"):
-    """Carte de tâche cohérente avec le board, avec navigation vers le projet."""
+    """Carte de tâche alignée sur celle du projet, cliquable vers le projet."""
     project = get_project(item["project_id"])
     if not project:
         return
-    task = next((t for t in project.get("tasks", []) if t.get("id") == item["task_id"]), None)
+    task = next((t for t in project.get("tasks", []) if str(t.get("id")) == str(item["task_id"])), None)
     if not task:
         return
-    with st.container(key=f"workload_task_{section_key}_{task['id']}"):
-        c = st.columns([1.7, .9, .7, .65], vertical_alignment="center")
-        with c[0]:
-            st.button(task.get("title", "Tâche"), key=f"workload_open_{section_key}_{task['id']}",
-                      on_click=open_workload_project, args=(project["id"],), use_container_width=True)
+    # Le suffixe garantit une clé unique même si la tâche apparaît dans plusieurs sections.
+    status = task_status(task)
+    with st.container(key=f"task_{status}_{task['id']}_workload_{section_key}"):
+        c = st.columns([0.08, 1.5, 0.65, 0.6, 0.22], vertical_alignment="center")
+        c[0].markdown(
+            "<span class='workload-check-done'>✓</span>" if task.get("done")
+            else "<span class='workload-check-open'>○</span>", unsafe_allow_html=True
+        )
+        with c[1]:
+            st.button(
+                task.get("title", "Tâche"),
+                key=f"workload_open_{section_key}_{project['id']}_{task['id']}",
+                on_click=open_workload_project, args=(project["id"],),
+                use_container_width=True,
+            )
+            st.markdown(
+                f'<div class="by">⏱ {format_duration(item["minutes"])}</div>',
+                unsafe_allow_html=True,
+            )
             if task.get("done") and task.get("by"):
-                st.caption(f"✓ {tr('fait par')} {task['by']}")
-        c[1].markdown(f'<span class="workload-project">{esc(project["name"])}</span>', unsafe_allow_html=True)
-        c[2].markdown(f'<span class="workload-deadline">{parse(task["due"]):%d/%m/%Y}</span>', unsafe_allow_html=True)
-        c[3].markdown(f'<span style="color:{"#75DCC5" if task.get("done") else "#CFC8FF"};font-weight:800">{format_duration(item["minutes"])}</span>', unsafe_allow_html=True)
+                st.markdown(
+                    f'<div class="by">✓ {esc(tr("fait par"))} {esc(task["by"])}</div>',
+                    unsafe_allow_html=True,
+                )
+        c[2].markdown(owner_chip(task.get("owner", "Tout le monde")), unsafe_allow_html=True)
+        c[3].markdown(
+            f'{due_badge(task["due"], task.get("done", False))}'
+            f'<span class="date-small">{parse(task["due"]):%d/%m}</span>',
+            unsafe_allow_html=True,
+        )
+        c[4].markdown(
+            f'<span class="workload-duration {"done" if task.get("done") else ""}">'
+            f'{format_duration(item["minutes"])}</span>', unsafe_allow_html=True
+        )
 
 
 def workload_view():
     with st.container(key="workload_page"):
         st.markdown('<div class="side-title">📊 ' + tr("Charge de travail") + '</div>', unsafe_allow_html=True)
         st.caption(tr("Charge basée sur les deadlines") + " · Les tâches terminées sont affichées séparément.")
-        st.markdown('<div class="dialog-intro">Visualise ton temps à prévoir, repère les journées chargées et ouvre directement les tâches depuis la liste.</div>', unsafe_allow_html=True)
         all_rows = workload_data()
         rows = [x for x in all_rows if not x["done"]]
         completed = sorted((x for x in all_rows if x["done"]), key=lambda x: (x["date"], x["project"]))
@@ -1191,93 +1323,123 @@ def workload_view():
         k2.metric(tr("Aujourd'hui"), format_duration(today_minutes))
         k3.metric(tr("Cette semaine"), format_duration(week_minutes))
 
-        # Vue hebdomadaire inspirée de Temps d’écran : navigation semaine par semaine.
-        if "workload_week_start" not in st.session_state:
-            st.session_state.workload_week_start = monday
-        week_start = st.session_state.workload_week_start
-        week_end = week_start + timedelta(days=6)
-        week_rows = [x for x in all_rows if week_start <= x["date"] <= week_end]
-        open_week = [x for x in week_rows if not x["done"]]
-        done_week = [x for x in week_rows if x["done"]]
-        open_week_minutes = sum(x["minutes"] for x in open_week)
-        done_week_minutes = sum(x["minutes"] for x in done_week)
-
+        if "workload_period" not in st.session_state:
+            st.session_state.workload_period = "Semaine"
+        period_a, period_b = st.columns([1, 1], gap="small")
+        with period_a:
+            if st.button("Semaine", key="workload_view_week", use_container_width=True,
+                          type="primary" if st.session_state.workload_period == "Semaine" else "secondary"):
+                st.session_state.workload_period = "Semaine"
+                st.rerun()
+        with period_b:
+            if st.button("Mois", key="workload_view_month", use_container_width=True,
+                          type="primary" if st.session_state.workload_period == "Mois" else "secondary"):
+                st.session_state.workload_period = "Mois"
+                st.rerun()
+        view = st.session_state.workload_period
         st.markdown("#### Répartition du temps")
-        nav_l, nav_mid, nav_r = st.columns([1, 5, 1], vertical_alignment="center")
-        with nav_l:
-            if st.button("‹", key="workload_prev_week", help="Semaine précédente", use_container_width=True):
-                st.session_state.workload_week_start = week_start - timedelta(days=7)
-                st.rerun()
-        with nav_mid:
-            st.markdown(
-                f'<div style="text-align:center;color:#F3F0FF;font-weight:750;font-size:1.05rem;padding:.35rem">'
-                f'{week_start:%d %b} – {week_end:%d %b %Y}</div>', unsafe_allow_html=True
-            )
-        with nav_r:
-            if st.button("›", key="workload_next_week", help="Semaine suivante", use_container_width=True):
-                st.session_state.workload_week_start = week_start + timedelta(days=7)
-                st.rerun()
 
-        st.markdown(
-            f'<div style="display:flex;gap:18px;justify-content:center;flex-wrap:wrap;margin:.2rem 0 1rem">'
-            f'<span style="color:#CFC8FF;font-size:.84rem">● Ouvertes : <b>{format_duration(open_week_minutes)}</b></span>'
-            f'<span style="color:#75DCC5;font-size:.84rem">● Terminées : <b>{format_duration(done_week_minutes)}</b></span></div>',
-            unsafe_allow_html=True,
-        )
-
-        day_dates = [week_start + timedelta(days=i) for i in range(7)]
-        day_open = [sum(x["minutes"] for x in open_week if x["date"] == d) for d in day_dates]
-        day_done = [sum(x["minutes"] for x in done_week if x["date"] == d) for d in day_dates]
-        max_minutes = max([a+b for a,b in zip(day_open, day_done)] + [60])
-        day_cols = st.columns(7, gap="small")
-        selected_day = st.session_state.get("workload_selected_day", today)
-        if not (week_start <= selected_day <= week_end):
-            selected_day = week_start
-            st.session_state.workload_selected_day = selected_day
-        day_names = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
-        for i, (col, day) in enumerate(zip(day_cols, day_dates)):
-            with col:
-                opened = day_open[i]
-                finished = day_done[i]
-                total = opened + finished
-                open_pct = opened / max_minutes * 100
-                done_pct = finished / max_minutes * 100
-                st.markdown(
-                    f'<div style="height:142px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;'
-                    f'background:rgba(255,255,255,.025);border:1px solid rgba(190,180,255,.10);border-radius:14px;padding:9px 5px 7px">'
-                    f'<div style="font-size:.72rem;color:#DCD8F4;font-weight:700;margin-bottom:7px">{format_duration(total) if total else "—"}</div>'
-                    f'<div style="height:88px;width: min(25px,75%);display:flex;flex-direction:column;justify-content:flex-end;'
-                    f'background:rgba(255,255,255,.055);border-radius:8px;overflow:hidden">'
-                    f'<div title="Terminées : {format_duration(finished)}" style="height:{done_pct:.1f}%;background:#55CDB2;min-height:{5 if finished else 0}px"></div>'
-                    f'<div title="Ouvertes : {format_duration(opened)}" style="height:{open_pct:.1f}%;background:#8B7BFF;min-height:{5 if opened else 0}px"></div>'
-                    f'</div><div style="font-size:.72rem;color:#AFAACD;margin-top:7px">{day:%d/%m}</div></div>',
-                    unsafe_allow_html=True,
-                )
-                if st.button(day_names[i], key=f"workload_day_{day.isoformat()}", use_container_width=True,
-                             type="primary" if day == selected_day else "secondary"):
-                    st.session_state.workload_selected_day = day
+        if view == "Semaine":
+            if "workload_week_start" not in st.session_state:
+                st.session_state.workload_week_start = monday
+            period_start = st.session_state.workload_week_start
+            period_end = period_start + timedelta(days=6)
+            left, center, right = st.columns([1, 5, 1], vertical_alignment="center")
+            with left:
+                if st.button("‹", key="workload_prev_week", help="Semaine précédente", use_container_width=True):
+                    st.session_state.workload_week_start = period_start - timedelta(days=7)
                     st.rerun()
+            with center:
+                st.markdown(f'<div class="workload-period-label">{period_start:%d %b} – {period_end:%d %b %Y}</div>', unsafe_allow_html=True)
+            with right:
+                if st.button("›", key="workload_next_week", help="Semaine suivante", use_container_width=True):
+                    st.session_state.workload_week_start = period_start + timedelta(days=7)
+                    st.rerun()
+            period_rows = [x for x in all_rows if period_start <= x["date"] <= period_end]
+            day_dates = [period_start + timedelta(days=i) for i in range(7)]
+            selected_key = "workload_selected_day"
+            day_names = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
+        else:
+            if "workload_month_start" not in st.session_state:
+                st.session_state.workload_month_start = today.replace(day=1)
+            period_start = st.session_state.workload_month_start.replace(day=1)
+            next_month = (period_start.replace(day=28) + timedelta(days=4)).replace(day=1)
+            period_end = next_month - timedelta(days=1)
+            left, center, right = st.columns([1, 5, 1], vertical_alignment="center")
+            with left:
+                if st.button("‹", key="workload_prev_month", help="Mois précédent", use_container_width=True):
+                    st.session_state.workload_month_start = (period_start - timedelta(days=1)).replace(day=1)
+                    st.rerun()
+            with center:
+                st.markdown(f'<div class="workload-period-label">{period_start:%B %Y}</div>', unsafe_allow_html=True)
+            with right:
+                if st.button("›", key="workload_next_month", help="Mois suivant", use_container_width=True):
+                    st.session_state.workload_month_start = next_month
+                    st.rerun()
+            period_rows = [x for x in all_rows if period_start <= x["date"] <= period_end]
+            first_cell = period_start - timedelta(days=period_start.weekday())
+            day_dates = [first_cell + timedelta(days=i) for i in range(((period_end-first_cell).days // 7 + 1) * 7)]
+            selected_key = "workload_selected_month_day"
+            day_names = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
 
-        selected_rows = sorted([x for x in week_rows if x["date"] == selected_day],
+        open_period = [x for x in period_rows if not x["done"]]
+        done_period = [x for x in period_rows if x["done"]]
+        open_minutes = sum(x["minutes"] for x in open_period)
+        done_minutes = sum(x["minutes"] for x in done_period)
+        st.markdown(f'<div class="workload-legend"><span>● Ouvertes : <b>{format_duration(open_minutes)}</b></span><span>● Terminées : <b>{format_duration(done_minutes)}</b></span></div>', unsafe_allow_html=True)
+        selected_day = st.session_state.get(selected_key, today)
+        if selected_day not in day_dates:
+            selected_day = period_start if view == "Semaine" else min(max(today, period_start), period_end)
+            st.session_state[selected_key] = selected_day
+
+        if view == "Semaine":
+            cols = st.columns(7, gap="small")
+            max_minutes = max([sum(x["minutes"] for x in period_rows if x["date"] == d) for d in day_dates] + [60])
+            for i, (col, day) in enumerate(zip(cols, day_dates)):
+                with col:
+                    opened = sum(x["minutes"] for x in open_period if x["date"] == day)
+                    finished = sum(x["minutes"] for x in done_period if x["date"] == day)
+                    total = opened + finished
+                    st.markdown(f'<div class="workload-day-card {"selected" if day == selected_day else ""}"><div class="workload-day-total">{format_duration(total) if total else "—"}</div><div class="workload-bar-track"><div class="workload-bar-done" style="height:{finished/max_minutes*100:.1f}%"></div><div class="workload-bar-open" style="height:{opened/max_minutes*100:.1f}%"></div></div><div class="workload-day-date">{day:%d/%m}</div></div>', unsafe_allow_html=True)
+                    if st.button(day_names[i], key=f"workload_day_{day.isoformat()}", use_container_width=True,
+                                 type="primary" if day == selected_day else "secondary"):
+                        st.session_state[selected_key] = day
+                        st.rerun()
+        else:
+            head = st.columns(7, gap="small")
+            for c, name in zip(head, day_names):
+                c.markdown(f'<div class="workload-month-weekday">{name}</div>', unsafe_allow_html=True)
+            for week_index in range(0, len(day_dates), 7):
+                cols = st.columns(7, gap="small")
+                for col, day in zip(cols, day_dates[week_index:week_index+7]):
+                    with col:
+                        inside = day.month == period_start.month
+                        opened = sum(x["minutes"] for x in open_period if x["date"] == day)
+                        finished = sum(x["minutes"] for x in done_period if x["date"] == day)
+                        total = opened + finished
+                        label = f'<div class="workload-month-cell {"selected" if day == selected_day else ""} {"outside" if not inside else ""}"><b>{day.day}</b><span>{format_duration(total) if total else "·"}</span><div class="workload-month-dots"><i style="width:{min(100,opened/480*100):.0f}%;background:#8B7BFF"></i><i style="width:{min(100,finished/480*100):.0f}%;background:#5CE1C6"></i></div></div>'
+                        st.markdown(label, unsafe_allow_html=True)
+                        if st.button(" ", key=f"workload_month_day_{day.isoformat()}",
+                                     help=f"{day:%d/%m/%Y} · {format_duration(total)}", use_container_width=True):
+                            st.session_state[selected_key] = day
+                            st.rerun()
+
+        selected_rows = sorted([x for x in all_rows if x["date"] == selected_day],
                                key=lambda x: (x["done"], x["project"], x["title"]))
-        st.markdown(
-            f'<div style="margin:1rem 0 .45rem;color:#F3F0FF;font-weight:750;font-size:1rem">'
-            f'{selected_day:%A %d %B} · {len(selected_rows)} tâche(s)</div>', unsafe_allow_html=True
-        )
+        st.markdown(f'<div class="workload-selected-heading">{selected_day:%A %d %B} · {len(selected_rows)} tâche(s)</div>', unsafe_allow_html=True)
         if selected_rows:
             for item in selected_rows:
-                _workload_task_row(item, "selected_day")
+                _workload_task_row(item, f"{view.lower()}_selected")
         else:
             st.caption("Aucune tâche avec une échéance ce jour-là.")
 
-        upcoming = sorted((x for x in rows if x["date"] >= today), key=lambda x: (x["date"], x["project"]))
         st.markdown("### Tâches ouvertes")
+        upcoming = sorted((x for x in rows if x["date"] >= today), key=lambda x: (x["date"], x["project"]))
         if upcoming:
             for item in upcoming[:30]:
                 _workload_task_row(item, "upcoming")
         else:
             st.caption("Aucune tâche ouverte à venir.")
-
         st.markdown("### Tâches terminées")
         st.caption("Les tâches terminées restent accessibles, avec une présentation atténuée et un repère vert.")
         if completed:
@@ -1752,10 +1914,24 @@ elif _cal_row:
 else:
     st.info("Google Calendar non connecté : utilise le bouton « Connecter Google Calendar » dans la barre latérale.")
 
-page = st.radio(
-    "Navigation", [tr("Projets"), tr("Charge de travail")],
-    horizontal=True, key="main_navigation", label_visibility="collapsed",
-)
+if "main_navigation" not in st.session_state:
+    st.session_state.main_navigation = tr("Projets")
+nav_left, nav_right = st.columns(2, gap="medium")
+with nav_left:
+    if st.button(
+        "▦  " + tr("Projets"), key="nav_projects_main", use_container_width=True,
+        type="primary" if st.session_state.main_navigation == tr("Projets") else "secondary",
+    ):
+        st.session_state.main_navigation = tr("Projets")
+        st.rerun()
+with nav_right:
+    if st.button(
+        "▥  " + tr("Charge de travail"), key="nav_workload_main", use_container_width=True,
+        type="primary" if st.session_state.main_navigation == tr("Charge de travail") else "secondary",
+    ):
+        st.session_state.main_navigation = tr("Charge de travail")
+        st.rerun()
+page = st.session_state.main_navigation
 if page == tr("Charge de travail"):
     workload_view()
 else:
