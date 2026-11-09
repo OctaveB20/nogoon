@@ -12,6 +12,7 @@ from pathlib import Path
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
+import plotly.graph_objects as go
 
 from cryptography.fernet import Fernet
 from google.auth.transport.requests import Request
@@ -304,6 +305,136 @@ CSS = """
   }
   .st-key-add_tile button { min-height: 80px; }
   [class*="st-key-task_"] [data-testid="stVerticalBlock"] { gap: .4rem; }
+}
+
+/* Navigation principale : deux véritables onglets/cartes */
+.st-key-main_navigation { margin: 1.2rem 0 1.8rem; }
+.st-key-main_navigation [role="radiogroup"] {
+  display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .85rem !important;
+  width: 100%;
+}
+.st-key-main_navigation [role="radiogroup"] label {
+  min-height: 76px; display: flex; align-items: center; justify-content: center;
+  padding: 1rem 1.4rem !important; border-radius: 18px !important;
+  border: 1px solid rgba(255,255,255,.14) !important;
+  background: linear-gradient(145deg,rgba(255,255,255,.075),rgba(255,255,255,.025)) !important;
+  box-shadow: 0 10px 28px rgba(0,0,0,.12); transition: all .22s ease;
+}
+.st-key-main_navigation [role="radiogroup"] label p,
+.st-key-main_navigation [role="radiogroup"] label div { color: #D8D7F2 !important; font-size: 1.08rem !important; font-weight: 800 !important; }
+.st-key-main_navigation [role="radiogroup"] label:has(input:checked) {
+  border-color: rgba(139,123,255,.85) !important;
+  background: linear-gradient(120deg,rgba(139,123,255,.30),rgba(255,143,163,.12)) !important;
+  box-shadow: 0 12px 34px rgba(139,123,255,.2), inset 0 0 0 1px rgba(139,123,255,.18);
+}
+.st-key-main_navigation [role="radiogroup"] label:has(input:checked) p,
+.st-key-main_navigation [role="radiogroup"] label:has(input:checked) div { color: #FFFFFF !important; }
+.st-key-main_navigation [role="radiogroup"] label:hover { border-color: rgba(139,123,255,.65) !important; transform: translateY(-2px); }
+.st-key-main_navigation [role="radiogroup"] label > div:first-child { display: none; }
+
+/* Lisibilité renforcée dans les dialogues et la charge de travail */
+[data-testid="stDialog"] [data-testid="stMarkdownContainer"] p,
+[data-testid="stDialog"] [data-testid="stMarkdownContainer"] li { color: #DAD9F0; }
+[data-testid="stDialog"] label, [data-testid="stDialog"] [data-testid="stWidgetLabel"] p { color: #E4E2FA !important; font-weight: 600; }
+[data-testid="stDialog"] input, [data-testid="stDialog"] textarea,
+[data-testid="stDialog"] [data-baseweb="select"] * { color: #F1F0FF !important; }
+[data-testid="stDialog"] [data-testid="stCaptionContainer"] { color: #B7B7D5 !important; }
+.st-key-edit_duration_dummy { color: #fff; }
+.st-key-workload_daily, .st-key-workload_weekly {
+  background: linear-gradient(145deg,rgba(139,123,255,.095),rgba(255,255,255,.025));
+  border: 1px solid rgba(255,255,255,.09); border-radius: 22px;
+  padding: 1rem 1.15rem .65rem; margin: .65rem 0 1.15rem;
+  box-shadow: 0 16px 38px rgba(0,0,0,.12);
+}
+.st-key-workload_daily [data-testid="stMarkdownContainer"] h3,
+.st-key-workload_weekly [data-testid="stMarkdownContainer"] h3 { color: #F0EEFF; }
+.st-key-workload_daily [data-testid="stCaptionContainer"],
+.st-key-workload_weekly [data-testid="stCaptionContainer"] { color: #B9B8D8 !important; }
+.st-key-workload_daily .js-plotly-plot, .st-key-workload_weekly .js-plotly-plot { border-radius: 16px; overflow: hidden; }
+.st-key-workload_daily .stPlotlyChart, .st-key-workload_weekly .stPlotlyChart { background: transparent !important; }
+[data-testid="stMetric"] [data-testid="stMetricLabel"] { color: #C4C2E2 !important; }
+[data-testid="stMetric"] [data-testid="stMetricValue"] { color: #FFFFFF !important; }
+.st-key-task_edit_dialog_dummy { color: #fff; }
+
+/* Compte et connexion Google dans la sidebar */
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] { color: #C4C3E0 !important; }
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p { color: #E2E0F7; }
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] a { color: #B9AEFF !important; font-weight: 700; }
+[data-testid="stSidebar"] .side-title { color: #F0EEFF; }
+
+/* Dialogues plus nets, sans changer leur structure */
+[data-testid="stDialog"] [data-testid="stTextInput"] input,
+[data-testid="stDialog"] [data-testid="stTextArea"] textarea,
+[data-testid="stDialog"] [data-testid="stDateInput"] input { background: rgba(255,255,255,.055); border-color: rgba(255,255,255,.16); }
+[data-testid="stDialog"] [data-testid="stForm"] { display: flex; flex-direction: column; gap: .35rem; }
+[data-testid="stDialog"] hr { border-color: rgba(255,255,255,.10); margin: 1.1rem 0; }
+.dialog-intro { color:#DCD9FF; font-size:.9rem; font-weight:800; letter-spacing:.035em; padding:.7rem .9rem; margin:.55rem 0 .8rem; border-left:3px solid #8B7BFF; border-radius:0 12px 12px 0; background:linear-gradient(90deg,rgba(139,123,255,.14),rgba(139,123,255,.015)); }
+.dialog-intro span { color:#FF8FA3; padding:0 .2rem; }
+@media (max-width: 640px) {
+  .st-key-main_navigation [role="radiogroup"] { grid-template-columns: 1fr; }
+  .st-key-main_navigation [role="radiogroup"] label { min-height: 60px; }
+  .st-key-workload_daily, .st-key-workload_weekly { padding: .7rem; }
+}
+
+/* Contraste renforcé : charge de travail, formulaires et compte connecté */
+.st-key-workload_daily, .st-key-workload_weekly {
+  background: linear-gradient(145deg, rgba(30,29,61,.92), rgba(22,24,48,.88));
+  border: 1px solid rgba(157,143,255,.24); border-radius: 22px;
+  padding: 1.15rem 1.25rem .85rem; margin: .8rem 0 1.1rem;
+  box-shadow: 0 14px 36px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.035);
+}
+.st-key-workload_daily [data-testid="stMarkdownContainer"] h3,
+.st-key-workload_weekly [data-testid="stMarkdownContainer"] h3 { color:#FFFFFF !important; font-size:1.08rem; }
+.st-key-workload_daily [data-testid="stMarkdownContainer"] p,
+.st-key-workload_weekly [data-testid="stMarkdownContainer"] p,
+.st-key-workload_daily [data-testid="stCaptionContainer"],
+.st-key-workload_weekly [data-testid="stCaptionContainer"] { color:#C9C7E5 !important; }
+.st-key-workload_daily .stPlotlyChart, .st-key-workload_weekly .stPlotlyChart,
+.st-key-workload_daily [data-testid="stPlotlyChart"], .st-key-workload_weekly [data-testid="stPlotlyChart"] { background:transparent !important; }
+.st-key-workload_daily .js-plotly-plot, .st-key-workload_weekly .js-plotly-plot { border-radius:14px; overflow:hidden; }
+.st-key-workload_daily [data-testid="stAlert"], .st-key-workload_weekly [data-testid="stAlert"] { background:rgba(255,255,255,.045); }
+/* Navigation : deux pages principales, plus grandes et immédiatement identifiables */
+.st-key-main_navigation { margin:1.35rem 0 2rem !important; }
+.st-key-main_navigation [role="radiogroup"] { gap:1rem !important; }
+.st-key-main_navigation [role="radiogroup"] label {
+  min-height:98px !important; padding:1.35rem 1.7rem !important;
+  border-radius:22px !important; border:1px solid rgba(174,161,255,.25) !important;
+  background:linear-gradient(145deg,rgba(42,40,78,.92),rgba(27,28,54,.94)) !important;
+  box-shadow:0 12px 30px rgba(0,0,0,.2), inset 0 1px 0 rgba(255,255,255,.045);
+}
+.st-key-main_navigation [role="radiogroup"] label p,
+.st-key-main_navigation [role="radiogroup"] label div { color:#E5E2FF !important; font-size:1.25rem !important; font-weight:850 !important; letter-spacing:-.02em; }
+.st-key-main_navigation [role="radiogroup"] label:has(input:checked) {
+  background:linear-gradient(115deg,rgba(139,123,255,.38),rgba(91,75,174,.25)) !important;
+  border-color:rgba(177,163,255,.85) !important;
+  box-shadow:0 14px 34px rgba(139,123,255,.2),inset 0 0 0 1px rgba(177,163,255,.2);
+}
+.st-key-main_navigation [role="radiogroup"] label:hover { transform:translateY(-3px); }
+/* Les textes de l'édition de tâche doivent rester lisibles */
+[data-testid="stDialog"] [data-testid="stMarkdownContainer"] p,
+[data-testid="stDialog"] [data-testid="stMarkdownContainer"] strong,
+[data-testid="stDialog"] [data-testid="stWidgetLabel"] p,
+[data-testid="stDialog"] label p { color:#F0EEFF !important; }
+[data-testid="stDialog"] [data-testid="stCaptionContainer"] { color:#C7C4E4 !important; }
+[data-testid="stDialog"] [data-baseweb="slider"] [role="slider"] { background:#A99AFF !important; }
+.account-status { color:#F0EEFF; font-size:.9rem; font-weight:750; padding:.65rem .8rem; margin:.9rem 0 .5rem; border-radius:12px; background:rgba(92,225,198,.08); border:1px solid rgba(92,225,198,.2); }
+/* Bloc compte Google : contraste et hiérarchie */
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"],
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p { color:#E5E3FA !important; }
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] a { color:#C6BCFF !important; text-decoration:none; }
+[data-testid="stSidebar"] .side-title { color:#FFFFFF !important; }
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] a { color:#C6BCFF !important; }
+/* Dialogues de création / édition : finition légère */
+[data-testid="stDialog"] div[role="dialog"] { background:linear-gradient(155deg,#20213F,#191A32); }
+[data-testid="stDialog"] [data-testid="stTextInput"] input,
+[data-testid="stDialog"] [data-testid="stTextArea"] textarea,
+[data-testid="stDialog"] [data-testid="stDateInput"] input { border-radius:12px; }
+[data-testid="stDialog"] .stMultiSelect [data-baseweb="tag"] { background:rgba(139,123,255,.24); border:1px solid rgba(173,160,255,.28); }
+@media (max-width:640px) {
+  .st-key-main_navigation [role="radiogroup"] label { min-height:72px !important; padding:.9rem !important; }
+  .st-key-main_navigation [role="radiogroup"] label p,
+  .st-key-main_navigation [role="radiogroup"] label div { font-size:1.05rem !important; }
+  .st-key-workload_daily, .st-key-workload_weekly { padding:.8rem; }
 }
 </style>
 """
@@ -894,9 +1025,46 @@ def workload_data():
     return rows
 
 
+def _workload_chart(title, subtitle, labels, values, task_details, key):
+    """Graphique compact intégré à la charte sombre/violette, avec interactions Plotly."""
+    with st.container(key=key):
+        st.markdown("### " + tr(title))
+        st.caption(tr(subtitle))
+        if not any(values):
+            st.info(tr("Aucune tâche planifiée sur cette période."))
+            return
+        hover = ["<br>".join(detail) if detail else "Aucune tâche" for detail in task_details]
+        # Une barre horizontale améliore la lecture des charges et des libellés.
+        fig = go.Figure(go.Bar(
+            x=values, y=labels, orientation="h", customdata=hover,
+            marker=dict(color="#8B7BFF", line=dict(color="rgba(196,185,255,.35)", width=1),
+                        cornerradius=7),
+            hovertemplate="<b>%{y}</b><br><span>Charge estimée</span> : <b>%{x:.2f} h</b><br><br>%{customdata}<extra></extra>",
+        ))
+        fig.update_layout(
+            height=max(250, 34 * len(labels) + 70),
+            margin=dict(l=8, r=18, t=8, b=8),
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(family="Manrope, sans-serif", color="#E8E6FF", size=12),
+            showlegend=False,
+            hoverlabel=dict(bgcolor="#22213D", bordercolor="#8B7BFF", font=dict(color="#FFFFFF", size=12)),
+            xaxis=dict(title="Heures", showgrid=True, gridcolor="rgba(210,205,255,.09)",
+                       zeroline=False, tickfont=dict(color="#BDB9DC"), rangemode="tozero", fixedrange=False),
+            yaxis=dict(showgrid=False, tickfont=dict(color="#E2DFFF", size=11), autorange="reversed", fixedrange=False),
+            bargap=.38, dragmode="pan", selectdirection="h",
+        )
+        st.plotly_chart(
+            fig, use_container_width=True, theme=None, key=f"{key}_plot",
+            config={"displayModeBar": True, "displaylogo": False,
+                    "modeBarButtonsToRemove": ["lasso2d", "select2d", "autoScale2d"],
+                    "scrollZoom": True, "responsive": True},
+        )
+
+
 def workload_view():
     st.markdown('<div class="side-title">📊 ' + tr("Charge de travail") + '</div>', unsafe_allow_html=True)
     st.caption(tr("Charge basée sur les deadlines") + " · " + tr("Les tâches terminées sont exclues."))
+    st.markdown('<div class="dialog-intro">Visualise ton temps à prévoir, repère les journées chargées et ouvre les détails en survolant les barres.</div>', unsafe_allow_html=True)
     rows = workload_data()
     today = date.today()
     total_minutes = sum(x["minutes"] for x in rows)
@@ -908,34 +1076,34 @@ def workload_view():
     k2.metric(tr("Aujourd'hui"), format_duration(today_minutes))
     k3.metric(tr("Cette semaine"), format_duration(week_minutes))
 
-    st.markdown("### " + tr("Charge quotidienne"))
-    days = [today + timedelta(days=i) for i in range(7)]
-    daily = {d: sum(x["minutes"] for x in rows if x["date"] == d) / 60 for d in days}
-    if any(daily.values()):
-        st.bar_chart({"Heures": daily}, height=250, use_container_width=True)
-    else:
-        st.info(tr("Aucune tâche planifiée sur cette période."))
+    st.markdown("#### " + tr("Répartition du temps"))
+    st.caption("Chaque barre correspond au temps estimé des tâches dont la deadline tombe sur la période. Survole une barre pour voir les tâches, et utilise les contrôles du graphique pour zoomer ou te déplacer.")
 
-    st.markdown("### " + tr("Charge hebdomadaire"))
+    days = [today + timedelta(days=i) for i in range(7)]
+    daily_labels = [d.strftime("%a %d/%m") for d in days]
+    daily_values = [sum(x["minutes"] for x in rows if x["date"] == d) / 60 for d in days]
+    daily_details = [[f"• {x['title']} · {format_duration(x['minutes'])} · {x['project']}"
+                      for x in rows if x["date"] == d] for d in days]
+    _workload_chart("Charge quotidienne", "Les 7 prochains jours", daily_labels, daily_values,
+                    daily_details, "workload_daily")
+
     weeks = [monday + timedelta(weeks=i) for i in range(8)]
-    weekly = {
-        f"S{d.isocalendar().week} · {d.strftime('%d/%m')}": sum(
-            x["minutes"] for x in rows if d <= x["date"] < d + timedelta(days=7)
-        ) / 60 for d in weeks
-    }
-    if any(weekly.values()):
-        st.bar_chart({"Heures": weekly}, height=280, use_container_width=True)
-    else:
-        st.info(tr("Aucune tâche planifiée sur cette période."))
+    weekly_labels = [f"S{d.isocalendar().week} · {d.strftime('%d/%m')}" for d in weeks]
+    weekly_values = [sum(x["minutes"] for x in rows if d <= x["date"] < d + timedelta(days=7)) / 60
+                     for d in weeks]
+    weekly_details = [[f"• {x['title']} · {format_duration(x['minutes'])} · {x['project']}"
+                       for x in rows if d <= x["date"] < d + timedelta(days=7)] for d in weeks]
+    _workload_chart("Charge hebdomadaire", "Les 8 prochaines semaines", weekly_labels, weekly_values,
+                    weekly_details, "workload_weekly")
 
     upcoming = sorted((x for x in rows if x["date"] >= today), key=lambda x: (x["date"], x["project"]))
     if upcoming:
         st.markdown("### " + tr("Tâches ouvertes"))
         for item in upcoming[:20]:
             a, b, c = st.columns([3, 1.3, 1])
-            a.write(item["title"])
+            a.markdown(f"<span style='color:#F0EEFF;font-weight:650'>{esc(item['title'])}</span>", unsafe_allow_html=True)
             b.caption(item["project"])
-            c.markdown(f"**{format_duration(item['minutes'])}**")
+            c.markdown(f"<span style='color:#CFC8FF;font-weight:800'>{format_duration(item['minutes'])}</span>", unsafe_allow_html=True)
             st.caption(f"Échéance : {item['date']:%d/%m/%Y}")
 
 
@@ -943,14 +1111,14 @@ def workload_view():
 @st.dialog(tr("Nouveau projet"))
 def new_project():
     st.caption("Organise ton travail, fixe une échéance et invite ton équipe.")
-    st.markdown("**01 · " + tr("Informations du projet") + "**")
+    st.markdown('<div class="dialog-intro">01 <span>·</span> ' + tr("Informations du projet") + '</div>', unsafe_allow_html=True)
     name = st.text_input(tr("Nom du projet"), placeholder=tr("Ex. Étude de cas marketing"))
     desc = st.text_area(tr("Description (facultatif)"), height=90,
                         placeholder="Quel est l'objectif de ce projet ?")
     due = st.date_input(
         tr("Deadline du projet"), value=date.today() + timedelta(days=14), format="DD/MM/YYYY"
     )
-    st.markdown("**02 · " + tr("Qui est dans l'équipe ?") + "**")
+    st.markdown('<div class="dialog-intro">02 <span>·</span> ' + tr("Qui est dans l'équipe ?") + '</div>', unsafe_allow_html=True)
     others = [x for x in profiles() if x["id"] != me()["id"]]
     chosen = st.multiselect(
         tr("Qui est dans l'équipe ?"), [x["name"] for x in others],
@@ -983,6 +1151,7 @@ def new_project():
 def new_task(pid):
     p = get_project(pid)
     st.markdown("Ajoute les informations essentielles, puis estime le temps nécessaire.")
+    st.markdown('<div class="dialog-intro">01 <span>·</span> Détails de la tâche</div>', unsafe_allow_html=True)
     title = st.text_input(tr("Tâche"), placeholder=tr("Ex. Rédiger l'introduction"))
     c1, c2 = st.columns(2)
     due = c1.date_input("Deadline", value=date.today() + timedelta(days=3), format="DD/MM/YYYY")
@@ -1006,6 +1175,8 @@ def edit_project(pid):
     p = get_project(pid)
     if not p:
         return
+    st.caption("Modifie les informations du projet et les personnes qui y participent.")
+    st.markdown('<div class="dialog-intro">01 <span>·</span> Informations du projet</div>', unsafe_allow_html=True)
     with st.form(f"edit_project_dialog_{pid}", border=False):
         new_name = st.text_input(tr("Nom du projet"), value=p["name"])
         new_desc = st.text_area(tr("Description (facultatif)"), value=p.get("desc", ""), height=100)
@@ -1038,6 +1209,8 @@ def edit_task(pid, tid):
     t = next((x for x in p.get("tasks", []) if x["id"] == tid), None) if p else None
     if not t:
         return
+    st.caption("Ajuste les détails, la deadline et le temps nécessaire à cette tâche.")
+    st.markdown('<div class="dialog-intro">01 <span>·</span> Détails de la tâche</div>', unsafe_allow_html=True)
     with st.form(f"edit_task_dialog_{tid}", border=False):
         new_title = st.text_input(tr("Tâche"), value=t["title"])
         c1, c2 = st.columns(2)
@@ -1314,7 +1487,7 @@ def sidebar(calendar_connection_row, calendar_error):
             on_click="ignore",
             use_container_width=True,
         )
-        st.caption(tr("Connecté : {name}").format(name=me()["name"]))
+        st.markdown('<div class="account-status">● &nbsp;' + html.escape(tr("Connecté : {name}").format(name=me()["name"])) + '</div>', unsafe_allow_html=True)
         st.markdown('<div class="side-title" style="font-size:1.05rem;margin-top:1.4rem">Google Calendar</div>', unsafe_allow_html=True)
 
         if calendar_error:
