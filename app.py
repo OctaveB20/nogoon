@@ -12,7 +12,6 @@ from pathlib import Path
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
-import plotly.graph_objects as go
 
 from cryptography.fernet import Fernet
 from google.auth.transport.requests import Request
@@ -1133,25 +1132,84 @@ def workload_view():
         k2.metric(tr("Aujourd'hui"), format_duration(today_minutes))
         k3.metric(tr("Cette semaine"), format_duration(week_minutes))
 
+        # Vue hebdomadaire inspirée de Temps d’écran : navigation semaine par semaine.
+        if "workload_week_start" not in st.session_state:
+            st.session_state.workload_week_start = monday
+        week_start = st.session_state.workload_week_start
+        week_end = week_start + timedelta(days=6)
+        week_rows = [x for x in all_rows if week_start <= x["date"] <= week_end]
+        open_week = [x for x in week_rows if not x["done"]]
+        done_week = [x for x in week_rows if x["done"]]
+        open_week_minutes = sum(x["minutes"] for x in open_week)
+        done_week_minutes = sum(x["minutes"] for x in done_week)
+
         st.markdown("#### Répartition du temps")
-        st.caption("Chaque barre correspond au temps estimé des tâches dont la deadline tombe sur la période. Survole une barre pour consulter le détail.")
+        nav_l, nav_mid, nav_r = st.columns([1, 5, 1], vertical_alignment="center")
+        with nav_l:
+            if st.button("‹", key="workload_prev_week", help="Semaine précédente", use_container_width=True):
+                st.session_state.workload_week_start = week_start - timedelta(days=7)
+                st.rerun()
+        with nav_mid:
+            st.markdown(
+                f'<div style="text-align:center;color:#F3F0FF;font-weight:750;font-size:1.05rem;padding:.35rem">'
+                f'{week_start:%d %b} – {week_end:%d %b %Y}</div>', unsafe_allow_html=True
+            )
+        with nav_r:
+            if st.button("›", key="workload_next_week", help="Semaine suivante", use_container_width=True):
+                st.session_state.workload_week_start = week_start + timedelta(days=7)
+                st.rerun()
 
-        days = [today + timedelta(days=i) for i in range(7)]
-        daily_labels = [d.strftime("%a %d/%m") for d in days]
-        daily_values = [sum(x["minutes"] for x in rows if x["date"] == d) / 60 for d in days]
-        daily_details = [[f"• {x['title']} · {format_duration(x['minutes'])} · {x['project']}"
-                          for x in rows if x["date"] == d] for d in days]
-        _workload_chart("Charge quotidienne", "Les 7 prochains jours", daily_labels, daily_values,
-                        daily_details, "workload_daily")
+        st.markdown(
+            f'<div style="display:flex;gap:18px;justify-content:center;flex-wrap:wrap;margin:.2rem 0 1rem">'
+            f'<span style="color:#CFC8FF;font-size:.84rem">● Ouvertes : <b>{format_duration(open_week_minutes)}</b></span>'
+            f'<span style="color:#75DCC5;font-size:.84rem">● Terminées : <b>{format_duration(done_week_minutes)}</b></span></div>',
+            unsafe_allow_html=True,
+        )
 
-        weeks = [monday + timedelta(weeks=i) for i in range(8)]
-        weekly_labels = [f"S{d.isocalendar().week} · {d.strftime('%d/%m')}" for d in weeks]
-        weekly_values = [sum(x["minutes"] for x in rows if d <= x["date"] < d + timedelta(days=7)) / 60
-                         for d in weeks]
-        weekly_details = [[f"• {x['title']} · {format_duration(x['minutes'])} · {x['project']}"
-                           for x in rows if d <= x["date"] < d + timedelta(days=7)] for d in weeks]
-        _workload_chart("Charge hebdomadaire", "Les 8 prochaines semaines", weekly_labels, weekly_values,
-                        weekly_details, "workload_weekly")
+        day_dates = [week_start + timedelta(days=i) for i in range(7)]
+        day_open = [sum(x["minutes"] for x in open_week if x["date"] == d) for d in day_dates]
+        day_done = [sum(x["minutes"] for x in done_week if x["date"] == d) for d in day_dates]
+        max_minutes = max([a+b for a,b in zip(day_open, day_done)] + [60])
+        day_cols = st.columns(7, gap="small")
+        selected_day = st.session_state.get("workload_selected_day", today)
+        if not (week_start <= selected_day <= week_end):
+            selected_day = week_start
+            st.session_state.workload_selected_day = selected_day
+        day_names = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
+        for i, (col, day) in enumerate(zip(day_cols, day_dates)):
+            with col:
+                opened = day_open[i]
+                finished = day_done[i]
+                total = opened + finished
+                open_pct = opened / max_minutes * 100
+                done_pct = finished / max_minutes * 100
+                st.markdown(
+                    f'<div style="height:142px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;'
+                    f'background:rgba(255,255,255,.025);border:1px solid rgba(190,180,255,.10);border-radius:14px;padding:9px 5px 7px">'
+                    f'<div style="font-size:.72rem;color:#DCD8F4;font-weight:700;margin-bottom:7px">{format_duration(total) if total else "—"}</div>'
+                    f'<div style="height:88px;width: min(25px,75%);display:flex;flex-direction:column;justify-content:flex-end;'
+                    f'background:rgba(255,255,255,.055);border-radius:8px;overflow:hidden">'
+                    f'<div title="Terminées : {format_duration(finished)}" style="height:{done_pct:.1f}%;background:#55CDB2;min-height:{5 if finished else 0}px"></div>'
+                    f'<div title="Ouvertes : {format_duration(opened)}" style="height:{open_pct:.1f}%;background:#8B7BFF;min-height:{5 if opened else 0}px"></div>'
+                    f'</div><div style="font-size:.72rem;color:#AFAACD;margin-top:7px">{day:%d/%m}</div></div>',
+                    unsafe_allow_html=True,
+                )
+                if st.button(day_names[i], key=f"workload_day_{day.isoformat()}", use_container_width=True,
+                             type="primary" if day == selected_day else "secondary"):
+                    st.session_state.workload_selected_day = day
+                    st.rerun()
+
+        selected_rows = sorted([x for x in week_rows if x["date"] == selected_day],
+                               key=lambda x: (x["done"], x["project"], x["title"]))
+        st.markdown(
+            f'<div style="margin:1rem 0 .45rem;color:#F3F0FF;font-weight:750;font-size:1rem">'
+            f'{selected_day:%A %d %B} · {len(selected_rows)} tâche(s)</div>', unsafe_allow_html=True
+        )
+        if selected_rows:
+            for item in selected_rows:
+                _workload_task_row(item)
+        else:
+            st.caption("Aucune tâche avec une échéance ce jour-là.")
 
         upcoming = sorted((x for x in rows if x["date"] >= today), key=lambda x: (x["date"], x["project"]))
         st.markdown("### Tâches ouvertes")
