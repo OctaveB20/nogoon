@@ -585,6 +585,17 @@ CSS = """
   .st-key-workload_page .workload-month-cell { min-height:60px; }
   .st-key-workload_page .workload-month-cell span { font-size:.58rem; }
 }
+/* Titres et informations des cartes projets en blanc */
+.pc-name, .pc-name *,
+.pc-desc, .pc-meta, .pc-meta *,
+[data-testid="stSidebar"] .ring-name,
+[data-testid="stSidebar"] .ring-sub,
+[data-testid="stSidebar"] .by {
+  color: #FFFFFF !important;
+}
+[data-testid="stSidebar"] .ring-name { font-weight: 750; }
+[data-testid="stSidebar"] .ring-sub,
+[data-testid="stSidebar"] .by { opacity: .88; }
 </style>
 """
 
@@ -1940,3 +1951,29 @@ else:
         project_view(current)
     else:
         board()
+# Contraste des textes des cartes projets et de la navigation latérale.
+CSS += r"""
+<style>
+/* Cartes projets : tous les textes informatifs en blanc. */
+.st-key-board [class*="st-key-card_"] .pc-name,
+.st-key-board [class*="st-key-card_"] .pc-name *,
+.st-key-board [class*="st-key-card_"] .pc-desc,
+.st-key-board [class*="st-key-card_"] .pc-meta,
+.st-key-board [class*="st-key-card_"] .pc-meta > span {
+  color: #FFFFFF !important;
+}
+.st-key-board [class*="st-key-card_"] .badge,
+.st-key-board [class*="st-key-card_"] .badge * {
+  color: #FFFFFF !important;
+}
+/* Sidebar : nom, progression et détails des projets en blanc. */
+[data-testid="stSidebar"] .ring-name,
+[data-testid="stSidebar"] .ring-sub,
+[data-testid="stSidebar"] .ring-row .ring-name *,
+[data-testid="stSidebar"] .ring-row .ring-sub *,
+[data-testid="stSidebar"] .ring-row svg text {
+  color: #FFFFFF !important;
+  fill: #FFFFFF !important;
+}
+</style>
+"""
