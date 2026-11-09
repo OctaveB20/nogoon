@@ -436,6 +436,35 @@ CSS = """
   .st-key-main_navigation [role="radiogroup"] label div { font-size:1.05rem !important; }
   .st-key-workload_daily, .st-key-workload_weekly { padding:.8rem; }
 }
+
+/* Contraste explicite de tous les textes de la page Charge de travail */
+.st-key-workload_page [data-testid="stMarkdownContainer"],
+.st-key-workload_page [data-testid="stMarkdownContainer"] p,
+.st-key-workload_page [data-testid="stCaptionContainer"],
+.st-key-workload_page [data-testid="stCaptionContainer"] p,
+.st-key-workload_page [data-testid="stWidgetLabel"] p { color:#DCD9F5 !important; }
+.st-key-workload_page h1, .st-key-workload_page h2, .st-key-workload_page h3,
+.st-key-workload_page h4 { color:#FFFFFF !important; }
+.st-key-workload_page .workload-muted { color:#C5C2E2 !important; }
+.st-key-workload_page .workload-project { color:#C9C2FF !important; font-weight:750; }
+.st-key-workload_page .workload-deadline { color:#D5D2EC !important; }
+.st-key-workload_page [class*="st-key-task_"] { cursor:pointer; }
+.st-key-workload_page [class*="st-key-task_done_"] {
+  border-left-color:#5CE1C6 !important;
+  background:linear-gradient(90deg,rgba(92,225,198,.12),rgba(255,255,255,.025) 48%) !important;
+  opacity:.82;
+}
+.st-key-workload_page [class*="st-key-task_done_"] .t-title { color:#BDBBD2 !important; }
+.st-key-workload_page [class*="st-key-task_done_"] .owner,
+.st-key-workload_page [class*="st-key-task_done_"] .date-small { color:#AAA8C5 !important; }
+.st-key-workload_page [class*="st-key-workload_open_"] button {
+  background:transparent !important; border:0 !important; box-shadow:none !important;
+  color:#F0EEFF !important; text-align:left !important; padding:.1rem 0 !important;
+  font-weight:750 !important; min-height:unset !important;
+}
+.st-key-workload_page [class*="st-key-workload_open_"] button:hover { color:#BDB1FF !important; transform:none !important; }
+.st-key-workload_page .stPlotlyChart { background:transparent !important; }
+
 </style>
 """
 
@@ -1010,8 +1039,6 @@ def workload_data():
     rows = []
     for project in st.session_state.projects:
         for task in project.get("tasks", []):
-            if task.get("done"):
-                continue
             try:
                 due = parse(task["due"])
             except (KeyError, TypeError, ValueError):
@@ -1021,12 +1048,16 @@ def workload_data():
                 "minutes": max(0, int(task.get("duration_minutes", 60) or 60)),
                 "title": task.get("title", ""),
                 "project": project.get("name", ""),
+                "project_id": project.get("id"),
+                "task_id": task.get("id"),
+                "owner": task.get("owner", ""),
+                "done": bool(task.get("done")),
             })
     return rows
 
 
 def _workload_chart(title, subtitle, labels, values, task_details, key):
-    """Graphique compact intégré à la charte sombre/violette, avec interactions Plotly."""
+    """Graphique intégré à la DA ; survol informatif, sans barre d'outils ni zoom."""
     with st.container(key=key):
         st.markdown("### " + tr(title))
         st.caption(tr(subtitle))
@@ -1034,12 +1065,11 @@ def _workload_chart(title, subtitle, labels, values, task_details, key):
             st.info(tr("Aucune tâche planifiée sur cette période."))
             return
         hover = ["<br>".join(detail) if detail else "Aucune tâche" for detail in task_details]
-        # Une barre horizontale améliore la lecture des charges et des libellés.
         fig = go.Figure(go.Bar(
             x=values, y=labels, orientation="h", customdata=hover,
-            marker=dict(color="#8B7BFF", line=dict(color="rgba(196,185,255,.35)", width=1),
+            marker=dict(color="#8B7BFF", line=dict(color="rgba(196,185,255,.28)", width=1),
                         cornerradius=7),
-            hovertemplate="<b>%{y}</b><br><span>Charge estimée</span> : <b>%{x:.2f} h</b><br><br>%{customdata}<extra></extra>",
+            hovertemplate="<b>%{y}</b><br>Charge estimée : <b>%{x:.2f} h</b><br><br>%{customdata}<extra></extra>",
         ))
         fig.update_layout(
             height=max(250, 34 * len(labels) + 70),
@@ -1049,62 +1079,95 @@ def _workload_chart(title, subtitle, labels, values, task_details, key):
             showlegend=False,
             hoverlabel=dict(bgcolor="#22213D", bordercolor="#8B7BFF", font=dict(color="#FFFFFF", size=12)),
             xaxis=dict(title="Heures", showgrid=True, gridcolor="rgba(210,205,255,.09)",
-                       zeroline=False, tickfont=dict(color="#BDB9DC"), rangemode="tozero", fixedrange=False),
-            yaxis=dict(showgrid=False, tickfont=dict(color="#E2DFFF", size=11), autorange="reversed", fixedrange=False),
-            bargap=.38, dragmode="pan", selectdirection="h",
+                       zeroline=False, tickfont=dict(color="#BDB9DC"), rangemode="tozero", fixedrange=True),
+            yaxis=dict(showgrid=False, tickfont=dict(color="#E2DFFF", size=11), autorange="reversed", fixedrange=True),
+            bargap=.38,
         )
         st.plotly_chart(
             fig, use_container_width=True, theme=None, key=f"{key}_plot",
-            config={"displayModeBar": True, "displaylogo": False,
-                    "modeBarButtonsToRemove": ["lasso2d", "select2d", "autoScale2d"],
-                    "scrollZoom": True, "responsive": True},
+            config={"displayModeBar": False, "displaylogo": False,
+                    "scrollZoom": False, "staticPlot": False, "responsive": True},
         )
 
 
+def open_workload_project(pid):
+    st.session_state.open = pid
+    st.session_state.main_navigation = tr("Projets")
+
+
+def _workload_task_row(item):
+    """Réutilise le style des cartes de tâches du board, avec navigation vers le projet."""
+    project = get_project(item["project_id"])
+    if not project:
+        return
+    task = next((t for t in project.get("tasks", []) if t.get("id") == item["task_id"]), None)
+    if not task:
+        return
+    with st.container(key=f"task_{task_status(task)}_{task['id']}"):
+        c = st.columns([1.7, .9, .7, .65], vertical_alignment="center")
+        with c[0]:
+            st.button(task.get("title", "Tâche"), key=f"workload_open_{task['id']}",
+                      on_click=open_workload_project, args=(project["id"],), use_container_width=True)
+            if task.get("done") and task.get("by"):
+                st.caption(f"✓ {tr('fait par')} {task['by']}")
+        c[1].markdown(f'<span class="workload-project">{esc(project["name"])}</span>', unsafe_allow_html=True)
+        c[2].markdown(f'<span class="workload-deadline">{parse(task["due"]):%d/%m/%Y}</span>', unsafe_allow_html=True)
+        c[3].markdown(f'<span style="color:{"#75DCC5" if task.get("done") else "#CFC8FF"};font-weight:800">{format_duration(item["minutes"])}</span>', unsafe_allow_html=True)
+
+
 def workload_view():
-    st.markdown('<div class="side-title">📊 ' + tr("Charge de travail") + '</div>', unsafe_allow_html=True)
-    st.caption(tr("Charge basée sur les deadlines") + " · " + tr("Les tâches terminées sont exclues."))
-    st.markdown('<div class="dialog-intro">Visualise ton temps à prévoir, repère les journées chargées et ouvre les détails en survolant les barres.</div>', unsafe_allow_html=True)
-    rows = workload_data()
-    today = date.today()
-    total_minutes = sum(x["minutes"] for x in rows)
-    today_minutes = sum(x["minutes"] for x in rows if x["date"] == today)
-    monday = today - timedelta(days=today.weekday())
-    week_minutes = sum(x["minutes"] for x in rows if monday <= x["date"] < monday + timedelta(days=7))
-    k1, k2, k3 = st.columns(3)
-    k1.metric(tr("Heures restantes"), format_duration(total_minutes))
-    k2.metric(tr("Aujourd'hui"), format_duration(today_minutes))
-    k3.metric(tr("Cette semaine"), format_duration(week_minutes))
+    with st.container(key="workload_page"):
+        st.markdown('<div class="side-title">📊 ' + tr("Charge de travail") + '</div>', unsafe_allow_html=True)
+        st.caption(tr("Charge basée sur les deadlines") + " · Les tâches terminées sont affichées séparément.")
+        st.markdown('<div class="dialog-intro">Visualise ton temps à prévoir, repère les journées chargées et ouvre directement les tâches depuis la liste.</div>', unsafe_allow_html=True)
+        all_rows = workload_data()
+        rows = [x for x in all_rows if not x["done"]]
+        completed = sorted((x for x in all_rows if x["done"]), key=lambda x: (x["date"], x["project"]))
+        today = date.today()
+        total_minutes = sum(x["minutes"] for x in rows)
+        today_minutes = sum(x["minutes"] for x in rows if x["date"] == today)
+        monday = today - timedelta(days=today.weekday())
+        week_minutes = sum(x["minutes"] for x in rows if monday <= x["date"] < monday + timedelta(days=7))
+        k1, k2, k3 = st.columns(3)
+        k1.metric(tr("Heures restantes"), format_duration(total_minutes))
+        k2.metric(tr("Aujourd'hui"), format_duration(today_minutes))
+        k3.metric(tr("Cette semaine"), format_duration(week_minutes))
 
-    st.markdown("#### " + tr("Répartition du temps"))
-    st.caption("Chaque barre correspond au temps estimé des tâches dont la deadline tombe sur la période. Survole une barre pour voir les tâches, et utilise les contrôles du graphique pour zoomer ou te déplacer.")
+        st.markdown("#### Répartition du temps")
+        st.caption("Chaque barre correspond au temps estimé des tâches dont la deadline tombe sur la période. Survole une barre pour consulter le détail.")
 
-    days = [today + timedelta(days=i) for i in range(7)]
-    daily_labels = [d.strftime("%a %d/%m") for d in days]
-    daily_values = [sum(x["minutes"] for x in rows if x["date"] == d) / 60 for d in days]
-    daily_details = [[f"• {x['title']} · {format_duration(x['minutes'])} · {x['project']}"
-                      for x in rows if x["date"] == d] for d in days]
-    _workload_chart("Charge quotidienne", "Les 7 prochains jours", daily_labels, daily_values,
-                    daily_details, "workload_daily")
+        days = [today + timedelta(days=i) for i in range(7)]
+        daily_labels = [d.strftime("%a %d/%m") for d in days]
+        daily_values = [sum(x["minutes"] for x in rows if x["date"] == d) / 60 for d in days]
+        daily_details = [[f"• {x['title']} · {format_duration(x['minutes'])} · {x['project']}"
+                          for x in rows if x["date"] == d] for d in days]
+        _workload_chart("Charge quotidienne", "Les 7 prochains jours", daily_labels, daily_values,
+                        daily_details, "workload_daily")
 
-    weeks = [monday + timedelta(weeks=i) for i in range(8)]
-    weekly_labels = [f"S{d.isocalendar().week} · {d.strftime('%d/%m')}" for d in weeks]
-    weekly_values = [sum(x["minutes"] for x in rows if d <= x["date"] < d + timedelta(days=7)) / 60
-                     for d in weeks]
-    weekly_details = [[f"• {x['title']} · {format_duration(x['minutes'])} · {x['project']}"
-                       for x in rows if d <= x["date"] < d + timedelta(days=7)] for d in weeks]
-    _workload_chart("Charge hebdomadaire", "Les 8 prochaines semaines", weekly_labels, weekly_values,
-                    weekly_details, "workload_weekly")
+        weeks = [monday + timedelta(weeks=i) for i in range(8)]
+        weekly_labels = [f"S{d.isocalendar().week} · {d.strftime('%d/%m')}" for d in weeks]
+        weekly_values = [sum(x["minutes"] for x in rows if d <= x["date"] < d + timedelta(days=7)) / 60
+                         for d in weeks]
+        weekly_details = [[f"• {x['title']} · {format_duration(x['minutes'])} · {x['project']}"
+                           for x in rows if d <= x["date"] < d + timedelta(days=7)] for d in weeks]
+        _workload_chart("Charge hebdomadaire", "Les 8 prochaines semaines", weekly_labels, weekly_values,
+                        weekly_details, "workload_weekly")
 
-    upcoming = sorted((x for x in rows if x["date"] >= today), key=lambda x: (x["date"], x["project"]))
-    if upcoming:
-        st.markdown("### " + tr("Tâches ouvertes"))
-        for item in upcoming[:20]:
-            a, b, c = st.columns([3, 1.3, 1])
-            a.markdown(f"<span style='color:#F0EEFF;font-weight:650'>{esc(item['title'])}</span>", unsafe_allow_html=True)
-            b.caption(item["project"])
-            c.markdown(f"<span style='color:#CFC8FF;font-weight:800'>{format_duration(item['minutes'])}</span>", unsafe_allow_html=True)
-            st.caption(f"Échéance : {item['date']:%d/%m/%Y}")
+        upcoming = sorted((x for x in rows if x["date"] >= today), key=lambda x: (x["date"], x["project"]))
+        st.markdown("### Tâches ouvertes")
+        if upcoming:
+            for item in upcoming[:30]:
+                _workload_task_row(item)
+        else:
+            st.caption("Aucune tâche ouverte à venir.")
+
+        st.markdown("### Tâches terminées")
+        st.caption("Les tâches terminées restent accessibles, avec une présentation atténuée et un repère vert.")
+        if completed:
+            for item in completed[:30]:
+                _workload_task_row(item)
+        else:
+            st.caption("Aucune tâche terminée pour le moment.")
 
 
 # ---------- Dialogues ----------
