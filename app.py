@@ -122,7 +122,7 @@ CSS = """
 @import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Manrope:wght@400;500;600;700&display=swap');
 
 :root {
-  --bg: #0D0E1C; --text: #ECEBFF; --muted: #8E8FB5;
+  --bg: #0D0E1C; --text: #9DB0FF; --muted: #8493D0;
   --line: rgba(255,255,255,.08); --accent: #8B7BFF;
 }
 .stApp {
@@ -463,6 +463,65 @@ CSS = """
 }
 .st-key-workload_page [class*="st-key-workload_open_"] button:hover { color:#BDB1FF !important; transform:none !important; }
 .st-key-workload_page .stPlotlyChart { background:transparent !important; }
+
+
+/* Palette alignée sur .streamlit/config.toml : fond #0D0E1C, texte #9DB0FF. */
+.st-key-workload_page { color:#9DB0FF !important; }
+.st-key-workload_page [data-testid="stMarkdownContainer"] p,
+.st-key-workload_page [data-testid="stCaptionContainer"],
+.st-key-workload_page [data-testid="stCaptionContainer"] p,
+.st-key-workload_page [data-testid="stWidgetLabel"] p { color:#9DB0FF !important; }
+.st-key-workload_page h1, .st-key-workload_page h2, .st-key-workload_page h3,
+.st-key-workload_page h4 { color:#E5E9FF !important; }
+.st-key-workload_page [data-testid="stMetricLabel"] { color:#9DB0FF !important; }
+.st-key-workload_page [data-testid="stMetricValue"] { color:#F4F5FF !important; }
+.st-key-workload_page .workload-project { color:#B8B0FF !important; }
+.st-key-workload_page .workload-deadline { color:#AFC0FF !important; }
+
+/* Les cartes workload reprennent le rythme et la structure visuelle des tâches du board. */
+.st-key-workload_page [class*="st-key-workload_task_"] {
+  padding:.55rem .75rem !important; margin:.35rem 0 !important;
+  border:1px solid rgba(157,176,255,.14) !important; border-left:3px solid #8B7BFF !important;
+  border-radius:14px !important; background:linear-gradient(100deg,rgba(139,123,255,.105),rgba(22,24,48,.58)) !important;
+  transition:border-color .18s ease, background .18s ease;
+}
+.st-key-workload_page [class*="st-key-workload_task_"]:hover {
+  border-color:rgba(157,176,255,.38) !important; background:linear-gradient(100deg,rgba(139,123,255,.17),rgba(22,24,48,.72)) !important;
+}
+.st-key-workload_page [class*="st-key-workload_task_completed_"] {
+  border-left-color:#5CE1C6 !important;
+  background:linear-gradient(100deg,rgba(92,225,198,.105),rgba(22,24,48,.55)) !important;
+}
+.st-key-workload_page [class*="st-key-workload_task_selected_day_"] { border-left-color:#8B7BFF !important; }
+.st-key-workload_page [class*="st-key-workload_open_"] button {
+  color:#E5E9FF !important; font-weight:750 !important; text-align:left !important;
+}
+.st-key-workload_page [class*="st-key-workload_task_completed_"] [class*="st-key-workload_open_"] button { color:#9DB0B8 !important; }
+
+/* Masque le contrôle radio (cercle / coche) sans supprimer les deux onglets. */
+.st-key-main_navigation [role="radiogroup"] label > div:first-child,
+.st-key-main_navigation [role="radio"] > div:first-child,
+.st-key-main_navigation [data-baseweb="radio"],
+.st-key-main_navigation input[type="radio"],
+.st-key-main_navigation [role="radio"] svg { display:none !important; }
+.st-key-main_navigation [role="radiogroup"] label { gap:0 !important; }
+
+/* Fenêtres de création et modification : contraste cohérent avec la palette du thème. */
+[data-testid="stDialog"] div[role="dialog"] { color:#9DB0FF !important; }
+[data-testid="stDialog"] [data-testid="stMarkdownContainer"] p,
+[data-testid="stDialog"] [data-testid="stCaptionContainer"],
+[data-testid="stDialog"] [data-testid="stWidgetLabel"] p,
+[data-testid="stDialog"] label { color:#AFC0FF !important; }
+[data-testid="stDialog"] h1, [data-testid="stDialog"] h2,
+[data-testid="stDialog"] h3 { color:#F0F2FF !important; }
+[data-testid="stDialog"] input, [data-testid="stDialog"] textarea,
+[data-testid="stDialog"] [data-baseweb="select"] * { color:#E8ECFF !important; }
+[data-testid="stDialog"] [data-testid="stTextInput"] input,
+[data-testid="stDialog"] [data-testid="stTextArea"] textarea,
+[data-testid="stDialog"] [data-testid="stDateInput"] input {
+  background:rgba(157,176,255,.055) !important; border:1px solid rgba(157,176,255,.22) !important;
+}
+.dialog-intro { color:#C8D2FF !important; background:linear-gradient(90deg,rgba(139,123,255,.18),rgba(157,176,255,.025)) !important; }
 
 </style>
 """
@@ -1094,18 +1153,18 @@ def open_workload_project(pid):
     st.session_state.main_navigation = tr("Projets")
 
 
-def _workload_task_row(item):
-    """Réutilise le style des cartes de tâches du board, avec navigation vers le projet."""
+def _workload_task_row(item, section_key="list"):
+    """Carte de tâche cohérente avec le board, avec navigation vers le projet."""
     project = get_project(item["project_id"])
     if not project:
         return
     task = next((t for t in project.get("tasks", []) if t.get("id") == item["task_id"]), None)
     if not task:
         return
-    with st.container(key=f"task_{task_status(task)}_{task['id']}"):
+    with st.container(key=f"workload_task_{section_key}_{task['id']}"):
         c = st.columns([1.7, .9, .7, .65], vertical_alignment="center")
         with c[0]:
-            st.button(task.get("title", "Tâche"), key=f"workload_open_{task['id']}",
+            st.button(task.get("title", "Tâche"), key=f"workload_open_{section_key}_{task['id']}",
                       on_click=open_workload_project, args=(project["id"],), use_container_width=True)
             if task.get("done") and task.get("by"):
                 st.caption(f"✓ {tr('fait par')} {task['by']}")
@@ -1207,7 +1266,7 @@ def workload_view():
         )
         if selected_rows:
             for item in selected_rows:
-                _workload_task_row(item)
+                _workload_task_row(item, "selected_day")
         else:
             st.caption("Aucune tâche avec une échéance ce jour-là.")
 
@@ -1215,7 +1274,7 @@ def workload_view():
         st.markdown("### Tâches ouvertes")
         if upcoming:
             for item in upcoming[:30]:
-                _workload_task_row(item)
+                _workload_task_row(item, "upcoming")
         else:
             st.caption("Aucune tâche ouverte à venir.")
 
@@ -1223,7 +1282,7 @@ def workload_view():
         st.caption("Les tâches terminées restent accessibles, avec une présentation atténuée et un repère vert.")
         if completed:
             for item in completed[:30]:
-                _workload_task_row(item)
+                _workload_task_row(item, "completed")
         else:
             st.caption("Aucune tâche terminée pour le moment.")
 
