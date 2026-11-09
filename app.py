@@ -1274,47 +1274,13 @@ def open_workload_project(pid):
 
 
 def _workload_task_row(item, section_key="list"):
-    """Carte de tâche alignée sur celle du projet, cliquable vers le projet."""
+    """Réutilise le rendu commun des tâches, comme dans la vue Projet."""
     project = get_project(item["project_id"])
     if not project:
         return
     task = next((t for t in project.get("tasks", []) if str(t.get("id")) == str(item["task_id"])), None)
-    if not task:
-        return
-    # Le suffixe garantit une clé unique même si la tâche apparaît dans plusieurs sections.
-    status = task_status(task)
-    with st.container(key=f"task_{status}_{task['id']}_workload_{section_key}"):
-        c = st.columns([0.08, 1.5, 0.65, 0.6, 0.22], vertical_alignment="center")
-        c[0].markdown(
-            "<span class='workload-check-done'>✓</span>" if task.get("done")
-            else "<span class='workload-check-open'>○</span>", unsafe_allow_html=True
-        )
-        with c[1]:
-            st.button(
-                task.get("title", "Tâche"),
-                key=f"workload_open_{section_key}_{project['id']}_{task['id']}",
-                on_click=open_workload_project, args=(project["id"],),
-                use_container_width=True,
-            )
-            st.markdown(
-                f'<div class="by">⏱ {format_duration(item["minutes"])}</div>',
-                unsafe_allow_html=True,
-            )
-            if task.get("done") and task.get("by"):
-                st.markdown(
-                    f'<div class="by">✓ {esc(tr("fait par"))} {esc(task["by"])}</div>',
-                    unsafe_allow_html=True,
-                )
-        c[2].markdown(owner_chip(task.get("owner", "Tout le monde")), unsafe_allow_html=True)
-        c[3].markdown(
-            f'{due_badge(task["due"], task.get("done", False))}'
-            f'<span class="date-small">{parse(task["due"]):%d/%m}</span>',
-            unsafe_allow_html=True,
-        )
-        c[4].markdown(
-            f'<span class="workload-duration {"done" if task.get("done") else ""}">'
-            f'{format_duration(item["minutes"])}</span>', unsafe_allow_html=True
-        )
+    if task:
+        render_task_card(project, task, key_suffix=f"workload_{section_key}")
 
 
 def workload_view():
@@ -1717,6 +1683,40 @@ def owner_chip(owner):
     )
 
 
+
+def render_task_card(p, t, key_suffix=""):
+    """Rendu unique des cartes de tâches dans Projets et Workload."""
+    suffix = f"_{key_suffix}" if key_suffix else ""
+    locked = False
+    duration_label = format_duration(t.get("duration_minutes", 60))
+    with st.container(key=f"task_{task_status(t)}_{t['id']}{suffix}"):
+        c = st.columns([0.08, 1.5, 0.65, 0.6, 0.22], vertical_alignment="center")
+        c[0].checkbox(
+            tr("fait"), value=t["done"], key=f"chk_{t['id']}{suffix}", on_change=toggle,
+            args=(p["id"], t["id"]), label_visibility="collapsed", disabled=locked,
+        )
+        cls = "t-title done" if t["done"] else "t-title"
+        by = f'<div class="by">{tr("fait par")} {esc(t["by"])}</div>' if t["done"] and t.get("by") else ""
+        c[1].markdown(
+            f'<div class="{cls}">{esc(t["title"])}</div>'
+            f'<div class="by">⏱ {duration_label}</div>{by}', unsafe_allow_html=True
+        )
+        c[2].markdown(owner_chip(t["owner"]), unsafe_allow_html=True)
+        c[3].markdown(
+            f'{due_badge(t["due"], t["done"])}<span class="date-small">{parse(t["due"]):%d/%m}</span>',
+            unsafe_allow_html=True,
+        )
+        with c[4].popover(":material/more_horiz:"):
+            st.caption(f"⏱ {duration_label}")
+            if st.button("Modifier", key=f"edit_task_btn_{t['id']}{suffix}", use_container_width=True):
+                edit_task(p["id"], t["id"])
+            st.divider()
+            st.button(
+                tr("Supprimer la tâche"), key=f"rm_{t['id']}{suffix}", on_click=delete_task,
+                args=(p["id"], t["id"]), use_container_width=True,
+            )
+
+
 def project_view(p):
     st.button(tr("←  Retour au board"), key="back", on_click=set_open, args=(None,))
     done, total = progress(p)
@@ -1766,33 +1766,7 @@ def project_view(p):
             last_grp = grp
             label, count = (tr("Terminées"), done) if t["done"] else (tr("À faire"), total - done)
             st.markdown(f'<div class="sec">{label}<span>{count}</span></div>', unsafe_allow_html=True)
-        with st.container(key=f"task_{task_status(t)}_{t['id']}"):
-            c = st.columns([0.08, 1.5, 0.65, 0.6, 0.22], vertical_alignment="center")
-            c[0].checkbox(
-                tr("fait"), value=t["done"], key=f"chk_{t['id']}", on_change=toggle,
-                args=(p["id"], t["id"]), label_visibility="collapsed", disabled=locked,
-            )
-            cls = "t-title done" if t["done"] else "t-title"
-            by = f'<div class="by">{tr("fait par")} {esc(t["by"])}</div>' if t["done"] and t.get("by") else ""
-            duration_label = format_duration(t.get("duration_minutes", 60))
-            c[1].markdown(
-                f'<div class="{cls}">{esc(t["title"])}</div>'
-                f'<div class="by">⏱ {duration_label}</div>{by}', unsafe_allow_html=True
-            )
-            c[2].markdown(owner_chip(t["owner"]), unsafe_allow_html=True)
-            c[3].markdown(
-                f'{due_badge(t["due"], t["done"])}<span class="date-small">{parse(t["due"]):%d/%m}</span>',
-                unsafe_allow_html=True,
-            )
-            with c[4].popover(":material/more_horiz:"):
-                st.caption(f"⏱ {duration_label}")
-                if st.button("Modifier", key=f"edit_task_btn_{t['id']}", use_container_width=True):
-                    edit_task(p["id"], t["id"])
-                st.divider()
-                st.button(
-                    tr("Supprimer la tâche"), key=f"rm_{t['id']}", on_click=delete_task,
-                    args=(p["id"], t["id"]), use_container_width=True,
-                )
+        render_task_card(p, t)
 
 
 def ring(p, active):
