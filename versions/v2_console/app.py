@@ -330,7 +330,7 @@ def task_card(p, t, suffix="", show_project=False):
         proj = f'<span>{esc(p["name"])}</span>' if show_project else ""
         by = f'<span>✓ {esc(t["by"])}</span>' if t["done"] and t.get("by") else ""
         b.markdown(
-            f'<div class="k-t{" done" if t["done"] else ""}">{esc(t["title"])}</div>'
+            f'<div class="k-t{" done" if t["done"] else ""}">{c.star(t)}{esc(t["title"])}</div>'
             f'<div class="k-m">{proj}<span>@<b>{esc(tr(t["owner"]))}</b></span><span>{c.parse(t["due"]):%d.%m}</span>'
             f'<span>⏱ {c.format_duration(t.get("duration_minutes", 60))}</span>{tag(t["due"], t["done"])}{by}</div>',
             unsafe_allow_html=True)
@@ -378,7 +378,7 @@ def board():
                 with cols[0]:
                     c.task_checkbox(p, t, "_mine")
                 cols[1].markdown(f'<span class="mono-s">{c.parse(t["due"]):%d.%m}</span>', unsafe_allow_html=True)
-                cols[2].markdown(f'<span class="mono-t">{esc(t["title"])}</span>', unsafe_allow_html=True)
+                cols[2].markdown(f'<span class="mono-t">{c.star(t)}{esc(t["title"])}</span>', unsafe_allow_html=True)
                 cols[3].markdown(f'<span class="mono-s">{esc(p["name"])}</span>', unsafe_allow_html=True)
                 cols[4].markdown(tag(t["due"]), unsafe_allow_html=True)
     if len(mine_all) > 10:
@@ -565,6 +565,7 @@ with top_r:
     if cal_row:
         if st.button("↻ SYNC", key="calendar_sync_main", use_container_width=True, help=tr("Synchroniser Google Calendar")):
             c.run_sync(tr("Calendrier synchronisé"))
+c.important_banner()
 if st.session_state.page == "planning":
     planning()
 else:

@@ -309,7 +309,7 @@ def task_tile(p, t, suffix="", show_project=True, key_prefix="task"):
             c.task_checkbox(p, t, s)
         proj = f'<span><i class="dotp" style="background:{tint(p["color"])[1]}"></i> {esc(p["name"])}</span>' if show_project else ""
         by = f'<span>✓ {tr("fait par")} {esc(t["by"])}</span>' if t["done"] and t.get("by") else ""
-        b.markdown(f'<div class="tt{" done" if t["done"] else ""}">{esc(t["title"])}</div>'
+        b.markdown(f'<div class="tt{" done" if t["done"] else ""}">{c.star(t)}{esc(t["title"])}</div>'
                    f'<div class="tm">{proj}{avatar(t["owner"])}<span>{esc(tr(t["owner"]))}</span>'
                    f'<span>⏱ {c.format_duration(t.get("duration_minutes", 60))}</span>{pill(t["due"], t["done"])}{by}</div>',
                    unsafe_allow_html=True)
@@ -584,6 +584,7 @@ def account():
 
 # ---------- Rendu ----------
 topbar()
+c.important_banner()
 page = st.session_state.page
 if page == "planning":
     planning()

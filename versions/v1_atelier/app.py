@@ -325,7 +325,7 @@ def task_row(p, t, suffix="", show_project=False):
         sub = esc(p["name"]) if show_project else ""
         if t["done"] and t.get("by"):
             sub += (" · " if sub else "") + f'{esc(tr("fait par"))} {esc(t["by"])}'
-        col[1].markdown(f'<div class="t-title{" done" if t["done"] else ""}">{esc(t["title"])}</div>'
+        col[1].markdown(f'<div class="t-title{" done" if t["done"] else ""}">{c.star(t)}{esc(t["title"])}</div>'
                         + (f'<div class="t-sub">{sub}</div>' if sub else ""), unsafe_allow_html=True)
         col[2].markdown(f'<div class="t-owner"><span class="ini">{esc(c.owner_initial(t["owner"]))}</span>{esc(tr(t["owner"]))}</div>',
                         unsafe_allow_html=True)
@@ -380,7 +380,7 @@ def board():
                 a, b = st.columns([0.12, 1])
                 with a:
                     c.task_checkbox(p, t, "_mine")
-                b.markdown(f'<div class="mine-t">{esc(t["title"])}</div><div class="mine-m"><span>{esc(p["name"])}</span>'
+                b.markdown(f'<div class="mine-t">{c.star(t)}{esc(t["title"])}</div><div class="mine-m"><span>{esc(p["name"])}</span>'
                            f'{tag(t["due"])}</div>', unsafe_allow_html=True)
         if len(mine_all) > 10:
             st.caption(tr("+ {n} autres tâches").format(n=len(mine_all) - 10))
@@ -536,6 +536,7 @@ def settings():
 
 # ---------- Rendu ----------
 masthead()
+c.important_banner()
 if cal_row and st.session_state.page != "settings":
     _, sync_col = st.columns([4, 1.3])
     if sync_col.button("↻ " + tr("Synchroniser Google Calendar"), key="calendar_sync_main", use_container_width=True):

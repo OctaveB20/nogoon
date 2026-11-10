@@ -45,6 +45,7 @@ TAGLINE = "Les deadlines de l'équipe, au même endroit."
 NO_PROJECT = "Aucun projet pour l'instant. Crée le premier."
 TODAY = "Aujourd'hui"
 TEAM_Q = "Qui est dans l'équipe ?"
+IMPORTANT_HELP = "Tu recevras un email de rappel avant la deadline, et une notification si Google Calendar est connecté."
 
 
 def apply_theme(**opts):
@@ -155,6 +156,10 @@ EN = {
     "Reste à faire": "Left to do", "Équipe": "Team", "Prochaine deadline": "Next deadline",
     "Raccourcis": "Shortcuts", "Système": "System", "Statut": "Status", "Propriétaire": "Owner",
     "Progression": "Progress", "Ajouter une tâche…": "Add a task…",
+    "Importante pour moi (rappels)": "Important to me (reminders)",
+    "Tu recevras un email de rappel avant la deadline, et une notification si Google Calendar est connecté.": "You'll get a reminder email before the deadline, and a notification if Google Calendar is connected.",
+    "Marquer importante": "Mark as important", "Retirer des importantes": "Remove from important",
+    "{n} tâche(s) importante(s) à surveiller : {items}": "{n} important task(s) to watch: {items}",
 }
 
 
@@ -234,6 +239,11 @@ def save():
 
 
 # ---------- Google Calendar ----------
+# Événement « journée entière » : les minutes se comptent depuis minuit le jour J.
+# 2340 = J-2 à 9 h, 900 = veille à 9 h. Google envoie alors une notification sur le téléphone.
+CALENDAR_IMPORTANT_REMINDERS = {"useDefault": False, "overrides": [
+    {"method": "popup", "minutes": 2340}, {"method": "popup", "minutes": 900}]}
+
 CALENDAR_SCOPES = [
     "https://www.googleapis.com/auth/calendar.events",
     "https://www.googleapis.com/auth/userinfo.email",
@@ -369,9 +379,11 @@ def sync_google_calendar():
             if task.get("done"):
                 continue
             try:
+                starred = is_important(task, user_id)
                 desired[("task", str(task["id"]))] = {
-                    "summary": f"{project['name']} : {task['title']}",
+                    "summary": ("⭐ " if starred else "") + f"{project['name']} : {task['title']}",
                     "description": f"Responsable : {task.get('owner', EVERYONE)}", "due": str(task["due"]),
+                    "important": starred,
                 }
             except (KeyError, TypeError) as exc:
                 invalid.append(f"Tâche sans deadline ou identifiant valide : {exc}")
@@ -385,7 +397,8 @@ def sync_google_calendar():
         try:
             due = date.fromisoformat(item["due"][:10])
             event = {"summary": item["summary"], "description": item["description"],
-                     "start": {"date": due.isoformat()}, "end": {"date": (due + timedelta(days=1)).isoformat()}}
+                     "start": {"date": due.isoformat()}, "end": {"date": (due + timedelta(days=1)).isoformat()},
+                     "reminders": CALENDAR_IMPORTANT_REMINDERS if item.get("important") else {"useDefault": True}}
             stable_id = hashlib.sha256(f"{user_id}:{entity_type}:{entity_id}".encode()).hexdigest()
             if event_id:
                 try:
@@ -865,12 +878,66 @@ def create_project(name, desc, due, chosen, others):
     save()
 
 
-def add_task(pid, title, due, owner, duration):
+def add_task(pid, title, due, owner, duration, important=False):
     get_project(pid)["tasks"].append({
         "id": uid(), "title": title.strip(), "due": due.isoformat(), "owner": owner,
         "duration_minutes": int(duration), "done": False, "by": "",
+        "important_for": [str(me()["id"])] if important else [],
     })
     save()
+
+
+def is_important(t, user_id=None):
+    """Une tâche est « importante » par utilisateur : chacun choisit les siennes."""
+    uid_ = str(user_id if user_id is not None else me()["id"])
+    return uid_ in [str(x) for x in t.get("important_for", [])]
+
+
+def set_important(t, value, user_id=None):
+    uid_ = str(user_id if user_id is not None else me()["id"])
+    ids = [str(x) for x in t.get("important_for", []) if str(x) != uid_]
+    t["important_for"] = ids + ([uid_] if value else [])
+
+
+def toggle_important(pid, tid):
+    for t in get_project(pid)["tasks"]:
+        if t["id"] == tid:
+            set_important(t, not is_important(t))
+    save()
+
+
+def star(t):
+    """Préfixe ⭐ à placer devant le titre d'une tâche importante pour moi."""
+    return "⭐ " if is_important(t) else ""
+
+
+REMIND_DAYS = 2
+
+
+def important_due_soon():
+    """Mes tâches importantes non faites : en retard ou à moins de REMIND_DAYS jours."""
+    today = date.today()
+    out = []
+    for p in st.session_state.projects:
+        for t in p["tasks"]:
+            try:
+                n = (parse(t["due"]) - today).days
+            except (KeyError, TypeError, ValueError):
+                continue
+            if not t["done"] and is_important(t) and n <= REMIND_DAYS:
+                out.append((p, t))
+    return sorted(out, key=lambda x: x[1]["due"])
+
+
+def important_banner():
+    """Rappel dans l'app, en haut de page, pour les tâches importantes proches."""
+    items = important_due_soon()
+    if not items:
+        return
+    text = ", ".join(f"{t['title']} ({due_info(t['due'])[1]})" for _, t in items[:4])
+    if len(items) > 4:
+        text += " …"
+    st.warning(tr("{n} tâche(s) importante(s) à surveiller : {items}").format(n=len(items), items=text), icon="⭐")
 
 
 def is_owner(p):
@@ -919,11 +986,13 @@ def open_new_task(pid):
         duration = st.select_slider(tr("Durée estimée"), options=DURATION_OPTIONS, value=60,
                                     key=f"new_duration_{pid}", format_func=format_duration)
         st.caption(tr("Charge estimée : {d}").format(d=format_duration(duration)))
+        important = st.toggle("⭐ " + tr("Importante pour moi (rappels)"), key=f"new_important_{pid}",
+                              help=tr(IMPORTANT_HELP))
         if st.button(tr("Ajouter la tâche"), type="primary", use_container_width=True):
             if not title.strip():
                 st.error(tr("Donne un nom à la tâche."))
                 return
-            add_task(pid, title, due, owner, duration)
+            add_task(pid, title, due, owner, duration, important)
             st.rerun()
     _dlg()
 
@@ -979,12 +1048,15 @@ def open_edit_task(pid, tid):
             duration = st.select_slider(tr("Durée estimée"), options=DURATION_OPTIONS,
                                         value=max(15, min(480, int(t.get("duration_minutes", 60) or 60))),
                                         key=f"edit_duration_{tid}", format_func=format_duration)
+            important = st.toggle("⭐ " + tr("Importante pour moi (rappels)"), value=is_important(t),
+                                  key=f"edit_important_{tid}", help=tr(IMPORTANT_HELP))
             submitted = st.form_submit_button(tr("Enregistrer les modifications"), type="primary", use_container_width=True)
         if submitted:
             if not new_title.strip():
                 st.error(tr("Donne un nom à la tâche."))
                 return
             t.update({"title": new_title.strip(), "due": new_due.isoformat(), "owner": new_owner, "duration_minutes": int(duration)})
+            set_important(t, important)
             save()
             st.toast(tr("Tâche mise à jour ✨"))
             st.rerun()
@@ -1013,6 +1085,8 @@ def open_confirm_delete(pid):
 def task_menu(p, t, suffix):
     """Contenu du menu « … » d'une tâche : modifier / supprimer."""
     st.caption(f"⏱ {format_duration(t.get('duration_minutes', 60))}")
+    st.button("☆ " + tr("Retirer des importantes") if is_important(t) else "⭐ " + tr("Marquer importante"),
+              key=f"imp_{t['id']}{suffix}", on_click=toggle_important, args=(p["id"], t["id"]), use_container_width=True)
     if st.button(tr("Modifier"), key=f"edit_task_btn_{t['id']}{suffix}", use_container_width=True):
         open_edit_task(p["id"], t["id"])
     st.button(tr("Supprimer la tâche"), key=f"rm_{t['id']}{suffix}", on_click=delete_task,

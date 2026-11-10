@@ -104,6 +104,10 @@ EN = {
     "Enregistrer les modifications": "Save changes", "Temps estimé": "Estimated time",
     "Charge basée sur les deadlines": "Workload based on task due dates",
     "Tâches ouvertes": "Open tasks", "Durée": "Duration",
+    "Importante pour moi (rappels)": "Important to me (reminders)",
+    "Marquer importante": "Mark as important", "Retirer des importantes": "Remove from important",
+    "{n} tâche(s) importante(s) à surveiller : {items}": "{n} important task(s) to watch: {items}",
+    "Tu recevras un email de rappel avant la deadline, et une notification si Google Calendar est connecté.": "You'll get a reminder email before the deadline, and a notification if Google Calendar is connected.",
     "Télécharge un fichier à ouvrir avec Google Agenda, Apple Calendrier ou Outlook : la deadline du projet et ses tâches non terminées y sont ajoutées.": "Downloads a file to open with Google Calendar, Apple Calendar or Outlook: the project deadline and its unfinished tasks get added.",
 }
 
@@ -680,6 +684,11 @@ def me():
 
 
 # ---------- Google Calendar OAuth & synchronisation ----------
+# Événement « journée entière » : minutes comptées depuis minuit le jour J.
+# 2340 = J-2 à 9 h, 900 = veille à 9 h (notification Google sur le téléphone).
+CALENDAR_IMPORTANT_REMINDERS = {"useDefault": False, "overrides": [
+    {"method": "popup", "minutes": 2340}, {"method": "popup", "minutes": 900}]}
+
 CALENDAR_SCOPES = [
     "https://www.googleapis.com/auth/calendar.events",
     "https://www.googleapis.com/auth/userinfo.email",
@@ -880,10 +889,12 @@ def sync_google_calendar():
             if task.get("done"):
                 continue
             try:
+                starred = is_important(task, user_id)
                 desired[("task", str(task["id"]))] = {
-                    "summary": f"{project['name']} : {task['title']}",
+                    "summary": ("⭐ " if starred else "") + f"{project['name']} : {task['title']}",
                     "description": f"Responsable : {task.get('owner', 'Tout le monde')}",
                     "due": str(task["due"]),
+                    "important": starred,
                 }
             except (KeyError, TypeError) as exc:
                 invalid.append(f"Tâche sans deadline ou identifiant valide : {exc}")
@@ -909,6 +920,7 @@ def sync_google_calendar():
                 "description": item["description"],
                 "start": {"date": due.isoformat()},
                 "end": {"date": (due + timedelta(days=1)).isoformat()},
+                "reminders": CALENDAR_IMPORTANT_REMINDERS if item.get("important") else {"useDefault": True},
             }
             stable_id = hashlib.sha256(
                 f"{user_id}:{entity_type}:{entity_id}".encode()
@@ -1180,6 +1192,42 @@ def set_task_due(pid, tid):
         if t["id"] == tid:
             t["due"] = st.session_state[f"due_{tid}"].isoformat()
     save()
+
+
+# ---------- Tâches importantes (choix personnel de chaque utilisateur) ----------
+IMPORTANT_HELP = "Tu recevras un email de rappel avant la deadline, et une notification si Google Calendar est connecté."
+REMIND_DAYS = 2
+
+
+def is_important(t, user_id=None):
+    uid_ = str(user_id if user_id is not None else me()["id"])
+    return uid_ in [str(x) for x in t.get("important_for", [])]
+
+
+def set_important(t, value):
+    uid_ = str(me()["id"])
+    t["important_for"] = [str(x) for x in t.get("important_for", []) if str(x) != uid_] + ([uid_] if value else [])
+
+
+def toggle_important(pid, tid):
+    for t in get_project(pid)["tasks"]:
+        if t["id"] == tid:
+            set_important(t, not is_important(t))
+    save()
+
+
+def important_banner():
+    today = date.today()
+    items = sorted(((p, t) for p in st.session_state.projects for t in p["tasks"]
+                    if not t["done"] and is_important(t) and (parse(t["due"]) - today).days <= REMIND_DAYS),
+                   key=lambda x: x[1]["due"])
+    if not items:
+        return
+    def when(d):
+        n = (parse(d) - today).days
+        return tr("en retard de {n} j").format(n=-n) if n < 0 else tr("aujourd'hui") if n == 0 else tr("demain") if n == 1 else tr("dans {n} j").format(n=n)
+    text = ", ".join(f"{t['title']} ({when(t['due'])})" for _, t in items[:4]) + (" …" if len(items) > 4 else "")
+    st.warning(tr("{n} tâche(s) importante(s) à surveiller : {items}").format(n=len(items), items=text), icon="⭐")
 
 
 # ---------- Estimation et charge de travail ----------
@@ -1477,13 +1525,15 @@ def new_task(pid):
     owner = c2.selectbox(tr("Responsable"), ["Tout le monde"] + p["members"], format_func=tr)
     duration = duration_picker("Durée estimée", 60, key=f"new_duration_{pid}")
     st.caption(f"Charge estimée : **{format_duration(duration)}**")
+    important = st.toggle("⭐ " + tr("Importante pour moi (rappels)"), key=f"new_important_{pid}", help=tr(IMPORTANT_HELP))
     if st.button(tr("Ajouter la tâche"), type="primary", use_container_width=True):
         if not title.strip():
             st.error(tr("Donne un nom à la tâche."))
             return
         p["tasks"].append({
             "id": uid(), "title": title.strip(), "due": due.isoformat(),
-            "owner": owner, "duration_minutes": int(duration), "done": False, "by": ""
+            "owner": owner, "duration_minutes": int(duration), "done": False, "by": "",
+            "important_for": [str(me()["id"])] if important else [],
         })
         save()
         st.rerun()
@@ -1542,6 +1592,8 @@ def edit_task(pid, tid):
             value=max(15, min(480, int(t.get("duration_minutes", 60) or 60))),
             key=f"edit_duration_{tid}", format_func=format_duration,
         )
+        important = st.toggle("⭐ " + tr("Importante pour moi (rappels)"), value=is_important(t),
+                              key=f"edit_important_{tid}", help=tr(IMPORTANT_HELP))
         submitted = st.form_submit_button(tr("Enregistrer les modifications"), type="primary", use_container_width=True)
     if submitted:
         if not new_title.strip():
@@ -1549,6 +1601,7 @@ def edit_task(pid, tid):
             return
         t.update({"title": new_title.strip(), "due": new_due.isoformat(),
                   "owner": new_owner, "duration_minutes": int(duration)})
+        set_important(t, important)
         save()
         st.toast("Tâche mise à jour ✨")
         st.rerun()
@@ -1630,7 +1683,7 @@ def board():
         for p, t in mine:
             st.markdown(
                 f'<div class="mt-row"><span class="dot" style="background:{p["color"]};color:{p["color"]}"></span>'
-                f'<span class="t-title">{esc(t["title"])}</span><span class="owner">{esc(p["name"])}</span>'
+                f'<span class="t-title">{"⭐ " if is_important(t) else ""}{esc(t["title"])}</span><span class="owner">{esc(p["name"])}</span>'
                 f'{due_badge(t["due"])}</div>',
                 unsafe_allow_html=True,
             )
@@ -1698,7 +1751,7 @@ def render_task_card(p, t, key_suffix=""):
         cls = "t-title done" if t["done"] else "t-title"
         by = f'<div class="by">{tr("fait par")} {esc(t["by"])}</div>' if t["done"] and t.get("by") else ""
         c[1].markdown(
-            f'<div class="{cls}">{esc(t["title"])}</div>'
+            f'<div class="{cls}">{"⭐ " if is_important(t) else ""}{esc(t["title"])}</div>'
             f'<div class="by">⏱ {duration_label}</div>{by}', unsafe_allow_html=True
         )
         c[2].markdown(owner_chip(t["owner"]), unsafe_allow_html=True)
@@ -1708,6 +1761,9 @@ def render_task_card(p, t, key_suffix=""):
         )
         with c[4].popover(":material/more_horiz:"):
             st.caption(f"⏱ {duration_label}")
+            st.button("☆ " + tr("Retirer des importantes") if is_important(t) else "⭐ " + tr("Marquer importante"),
+                      key=f"imp_{t['id']}{suffix}", on_click=toggle_important, args=(p["id"], t["id"]),
+                      use_container_width=True)
             if st.button("Modifier", key=f"edit_task_btn_{t['id']}{suffix}", use_container_width=True):
                 edit_task(p["id"], t["id"])
             st.divider()
@@ -1889,6 +1945,7 @@ except Exception as exc:
 
 sidebar(_cal_row, _cal_err)
 banner()
+important_banner()
 
 # Bloc toujours visible, même si la barre latérale est repliée.
 if _cal_err:
