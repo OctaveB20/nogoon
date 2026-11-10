@@ -1,2010 +1,600 @@
-import hashlib
-import hmac
-import html
-import json
-import os
-import secrets as py_secrets
-import time
-import uuid
-from datetime import date, datetime, timedelta, timezone
+"""anti gooner — Version 3 « Bento ».
+
+DA : douce et ludique. Fond pervenche, cartes blanches très arrondies, tuiles pastel,
+typographie ronde (Outfit + Plus Jakarta Sans), dégradé corail → violet en accent.
+UX : un tableau de bord « Accueil » en grille bento (focus du jour cochable, heures
+du jour/semaine, mini-graphe de la semaine, projets en anneaux, statut Calendar),
+une barre d'onglets flottante (Accueil · Projets · Planning · Compte) et une vue projet
+à deux colonnes « À faire / Terminées ».
+"""
+import sys
+from datetime import date, timedelta
 from pathlib import Path
 
-import requests
-import streamlit as st
-import streamlit.components.v1 as components
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from cryptography.fernet import Fernet
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import Flow
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
+import streamlit as st  # noqa: E402
 
-# Évite l'erreur "Scope has changed" quand Google renvoie des scopes supplémentaires.
-os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
+import core as c  # noqa: E402
+from core import esc, tr  # noqa: E402
 
-st.set_page_config(page_title="anti gooner", page_icon="🎯", layout="wide", initial_sidebar_state="expanded")
-
-DATA_FILE = Path(__file__).with_name("anti_gooner_data.json")
-COLORS = ["#8B7BFF", "#FF8FA3", "#5CE1C6", "#FFC46B", "#6BB6FF", "#C48BFF"]
-
-LANG = st.session_state.get("lang", "FR")
-
-EN = {
-    "Les deadlines de l'équipe, au même endroit.": "Your team's deadlines, all in one place.",
-    "projet": "project", "projets": "projects",
-    "tâche à faire": "task to do", "tâches à faire": "tasks to do",
-    "Connecte-toi pour retrouver tes projets.": "Log in to find your projects.",
-    "Connexion": "Log in", "Créer un compte": "Sign up", "Mot de passe": "Password",
-    "Se connecter": "Log in", "Email ou mot de passe incorrect.": "Wrong email or password.",
-    "Ton prénom (visible par tes amis)": "Your first name (visible to your friends)",
-    "Mot de passe (6 caractères minimum)": "Password (6 characters minimum)",
-    "Code d'invitation": "Invitation code", "Créer mon compte": "Create my account",
-    "Inscriptions fermées (INVITE_CODE absent des Secrets).": "Sign-ups are closed (INVITE_CODE missing from Secrets).",
-    "Code d'invitation incorrect.": "Wrong invitation code.",
-    "Vérifie le nom, l'email et le mot de passe (6 caractères minimum).": "Check the name, email and password (6 characters minimum).",
-    "Ce nom est déjà pris.": "This name is already taken.",
-    "Création impossible (cet email est peut-être déjà utilisé).": "Could not create the account (this email may already be in use).",
-    "Sauvegarde impossible, réessaie dans un instant.": "Could not save, try again in a moment.",
-    "Suppression impossible, réessaie dans un instant.": "Could not delete, try again in a moment.",
-    "Impossible de joindre la base de données (projet Supabase en pause, ou URL / clé incorrectes). Tes données ne sont pas perdues.": "Cannot reach the database (Supabase project paused, or wrong URL / key). Your data is not lost.",
-    "terminé": "done", "aujourd'hui": "today", "demain": "tomorrow",
-    "en retard de {n} j": "{n} d overdue", "dans {n} j": "in {n} d",
-    "{done}/{total} tâches": "{done}/{total} tasks",
-    "{done}/{total} tâches faites": "{done}/{total} tasks done",
-    "{done}/{total} tâches, deadline le {d}": "{done}/{total} tasks, deadline {d}",
-    "Ouvrir": "Open", "+  Nouveau projet": "+  New project",
-    "Aucun projet pour l'instant. Clique sur le + pour créer le premier.": "No projects yet. Click the + to create the first one.",
-    "Mes tâches": "My tasks", "←  Retour au board": "←  Back to board",
-    "+  Nouvelle tâche": "+  New task", "Gérer le projet": "Manage project",
-    "Ajouter un membre": "Add a member", "Choisis un ami inscrit": "Pick a registered friend",
-    "Ajouter": "Add", "Deadline du projet": "Project deadline", "Supprimer": "Delete",
-    "Pas encore de tâche. Ajoute la première avec sa deadline.": "No tasks yet. Add the first one with its deadline.",
-    "fait": "done", "fait par": "done by", "Tout le monde": "Everyone",
-    "Nouveau projet": "New project", "Nom du projet": "Project name",
-    "Ex. Étude de cas marketing": "E.g. Marketing case study",
-    "Description (facultatif)": "Description (optional)",
-    "Qui est dans l'équipe ?": "Who's on the team?",
-    "Ajoute des amis inscrits": "Add registered friends",
-    "Créer le projet": "Create project", "Donne un nom au projet.": "Give the project a name.",
-    "Nouvelle tâche": "New task", "Tâche": "Task",
-    "Ex. Rédiger l'introduction": "E.g. Write the introduction",
-    "Responsable": "Owner", "Ajouter la tâche": "Add task",
-    "Donne un nom à la tâche.": "Give the task a name.",
-    "Supprimer ce projet ?": "Delete this project?",
-    "« {name} » et ses {n} tâche(s) seront supprimés. Cette action est définitive.": "\"{name}\" and its {n} task(s) will be deleted. This cannot be undone.",
-    "Annuler": "Cancel", "Oui, supprimer": "Yes, delete",
-    "Avancement": "Progress",
-    "L'avancement de chaque projet apparaîtra ici.": "Each project's progress will show up here.",
-    "Sauvegarde": "Backup", "Exporter les données": "Export data",
-    "Connecté : {name}": "Logged in: {name}", "Se déconnecter": "Log out",
-    "Rester connecté sur cet appareil (cookie de 30 jours)": "Stay logged in on this device (30-day cookie)",
-    "Reconnexion automatique indisponible sur ce navigateur.": "Auto-login unavailable in this browser.",
-    "Reconnexion automatique activée.": "Auto-login enabled.",
-    "Reconnexion automatique désactivée.": "Auto-login turned off.",
-    "Désactiver": "Turn off",
-    "Rester connecté sur cet appareil": "Stay logged in on this device",
-    "Enregistre un cookie de 30 jours pour te reconnecter automatiquement.": "Saves a 30-day cookie to log you back in automatically.",
-    "Continuer avec Google": "Continue with Google",
-    "Ton compte Google n'a pas d'email vérifié.": "Your Google account has no verified email.",
-    "Première connexion avec {email}. Choisis ton prénom et entre le code d'invitation.": "First login with {email}. Pick your first name and enter the invitation code.",
-    "Prénom trop court.": "First name too short.",
-    "Création impossible, réessaie dans un instant.": "Could not create the account, try again in a moment.",
-    "Enregistrer": "Save",
-    "+ {n} autres tâches": "+ {n} more tasks",
-    "À faire": "To do", "Terminées": "Done",
-    "Supprimer la tâche": "Delete task",
-    "Ajouter à mon calendrier (.ics)": "Add to my calendar (.ics)",
-    "Durée estimée": "Estimated duration", "Charge de travail": "Workload",
-    "Projets": "Projects", "Planning": "Planning", "Aujourd'hui": "Today",
-    "Cette semaine": "This week", "Heures restantes": "Hours remaining",
-    "Charge quotidienne": "Daily workload", "Charge hebdomadaire": "Weekly workload",
-    "Aucune tâche planifiée sur cette période.": "No tasks due during this period.",
-    "min": "min", "h": "h", "Modifier le projet": "Edit project",
-    "Enregistrer les modifications": "Save changes", "Temps estimé": "Estimated time",
-    "Charge basée sur les deadlines": "Workload based on task due dates",
-    "Tâches ouvertes": "Open tasks", "Durée": "Duration",
-    "Importante pour moi (rappels)": "Important to me (reminders)",
-    "Marquer importante": "Mark as important", "Retirer des importantes": "Remove from important",
-    "{n} tâche(s) importante(s) à surveiller : {items}": "{n} important task(s) to watch: {items}",
-    "Tu recevras un email de rappel avant la deadline, et une notification si Google Calendar est connecté.": "You'll get a reminder email before the deadline, and a notification if Google Calendar is connected.",
-    "Télécharge un fichier à ouvrir avec Google Agenda, Apple Calendrier ou Outlook : la deadline du projet et ses tâches non terminées y sont ajoutées.": "Downloads a file to open with Google Calendar, Apple Calendar or Outlook: the project deadline and its unfinished tasks get added.",
-}
-
-
-def tr(s):
-    return EN.get(s, s) if LANG == "EN" else s
-
-
-def pl(n, one, many):
-    single = n == 1 or (n == 0 and LANG != "EN")
-    return f"{n} {tr(one if single else many)}"
-
+c.apply_theme(base="light", primaryColor="#6C4DFF", backgroundColor="#EDEFFA",
+              secondaryBackgroundColor="#FFFFFF", textColor="#20223A")
+st.set_page_config(page_title="anti gooner", page_icon="🍱", layout="wide", initial_sidebar_state="collapsed")
+c.init_backend()
 
 CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Manrope:wght@400;500;600;700&display=swap');
-
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+[data-testid="stMarkdownContainer"]:not(:has(> p)) { margin-bottom:0 !important; }
 :root {
-  --bg: #0D0E1C; --text: #9DB0FF; --muted: #8493D0;
-  --line: rgba(255,255,255,.08); --accent: #8B7BFF;
+  --bg:#EDEFFA; --card:#FFFFFF; --ink:#20223A; --muted:#6B6F8E; --soft:#F5F6FD; --line:rgba(32,34,58,.08);
+  --violet:#6C4DFF; --coral:#FF7A59; --grad:linear-gradient(120deg, #FF7A59, #C04CFD 55%, #6C4DFF);
+  --mint:#D7F5E8; --mint-i:#127A55; --peach:#FFE4D6; --peach-i:#B4441D; --lilac:#E7E1FF; --lilac-i:#4A33C9;
+  --butter:#FFF1C4; --butter-i:#8A6200; --sky:#DCEBFF; --sky-i:#1D5CB8; --rose:#FFE0E6; --rose-i:#B3264A;
+  --r:28px; --shadow:0 1px 2px rgba(32,34,58,.04), 0 12px 32px -12px rgba(32,34,58,.14);
+  --head:'Outfit', system-ui, sans-serif; --body:'Plus Jakarta Sans', system-ui, sans-serif;
 }
-.stApp {
-  background:
-    radial-gradient(900px 500px at 10% -10%, rgba(139,123,255,.22), transparent 60%),
-    radial-gradient(700px 480px at 95% 5%, rgba(255,143,163,.14), transparent 60%),
-    radial-gradient(800px 600px at 50% 110%, rgba(92,225,198,.10), transparent 60%),
-    var(--bg);
-  background-attachment: fixed;
-}
-.stApp, .stApp p, .stApp label, .stApp button, .stApp input, .stApp textarea { font-family: 'Manrope', sans-serif; }
-#MainMenu, footer { visibility: hidden; }
-[data-testid="stHeader"] { background: transparent; }
-.block-container { max-width: 1180px; padding-top: 2.5rem; }
+.stApp { background:radial-gradient(1100px 600px at 100% -10%, rgba(192,76,253,.16), transparent 60%),
+  radial-gradient(900px 500px at -10% 10%, rgba(255,122,89,.14), transparent 60%), var(--bg); background-attachment:fixed; }
+.stApp, .stApp p, .stApp label, .stApp button, .stApp input, .stApp textarea, .stApp li { font-family:var(--body); color:var(--ink); }
+#MainMenu, footer, [data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"], [data-testid="stExpandSidebarButton"] { display:none !important; }
+[data-testid="stHeader"] { background:transparent; }
+.block-container { max-width:1200px; padding:3.6rem 1.6rem 5rem; }
 
-/* Bannière */
-.banner { padding: 1.5rem 0 2.2rem; animation: rise .8s cubic-bezier(.2,.8,.2,1) both; }
-.banner h1 {
-  font-family: 'Bricolage Grotesque', sans-serif; font-weight: 800;
-  font-size: clamp(3.2rem, 9vw, 6.2rem); line-height: .95; letter-spacing: -0.045em; margin: 0;
-  padding: 0; background: linear-gradient(100deg, #FFFFFF 10%, #B9AEFF 55%, #FF8FA3 100%);
-  -webkit-background-clip: text; background-clip: text; color: transparent;
-}
-.banner p { color: var(--muted); font-size: 1.1rem; margin: .9rem 0 1.1rem; }
-.pill {
-  display: inline-block; padding: .3rem .85rem; margin-right: .5rem; border-radius: 999px;
-  background: rgba(255,255,255,.06); border: 1px solid var(--line); color: var(--text);
-  font-size: .85rem; font-weight: 600;
-}
-@keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+/* ---------- Barre supérieure ---------- */
+.st-key-topbar { position:relative; z-index:5; background:rgba(255,255,255,.78); backdrop-filter:blur(16px);
+  border:1px solid rgba(255,255,255,.9); border-radius:999px; padding:.4rem .5rem .4rem 1.1rem; box-shadow:var(--shadow); margin-bottom:1.6rem; }
+.st-key-topbar [data-testid="stHorizontalBlock"] { align-items:center; gap:.4rem; }
+.logo { font-family:var(--head); font-weight:800; font-size:1.3rem; letter-spacing:-.03em; white-space:nowrap; }
+.logo span { background:var(--grad); -webkit-background-clip:text; background-clip:text; color:transparent; }
+[class*="st-key-tab_"] button { border:0 !important; background:transparent !important; border-radius:999px !important; min-height:2.5rem; box-shadow:none !important; }
+[class*="st-key-tab_"] button p { font-weight:600 !important; color:var(--muted) !important; font-size:.92rem !important; white-space:nowrap; }
+[class*="st-key-tab_"] button:hover { background:var(--soft) !important; }
+[class*="st-key-tab_"] button[data-testid="stBaseButton-primary"] { background:var(--ink) !important; }
+[class*="st-key-tab_"] button[data-testid="stBaseButton-primary"] p { color:#fff !important; }
+.avatar-me { width:2.4rem; height:2.4rem; border-radius:50%; background:var(--grad); color:#fff; font-family:var(--head); font-weight:700;
+  display:flex; align-items:center; justify-content:center; margin-left:auto; box-shadow:0 6px 16px -6px rgba(108,77,255,.6); }
+.st-key-lang [role="radiogroup"] { gap:.2rem; background:var(--soft); border-radius:999px; padding:.2rem; justify-content:center; flex-wrap:nowrap; }
+.st-key-lang label { border-radius:999px; padding:.15rem .6rem; margin:0; cursor:pointer; }
+.st-key-lang label > div:first-child { display:none; }
+.st-key-lang label p { font-size:.78rem !important; font-weight:700; color:var(--muted) !important; }
+.st-key-lang label:has(input:checked) { background:#fff; box-shadow:0 2px 6px rgba(32,34,58,.12); }
+.st-key-lang label:has(input:checked) p { color:var(--ink) !important; }
 
-/* Cartes projets, tâches, en-tête projet */
-[class*="st-key-card_"], [class*="st-key-task_"], .st-key-ph {
-  background: linear-gradient(160deg, rgba(255,255,255,.065), rgba(255,255,255,.02));
-  border: 1px solid var(--line); border-radius: 22px; padding: 1.3rem 1.4rem;
-  backdrop-filter: blur(12px);
-  transition: transform .3s cubic-bezier(.2,.8,.2,1), border-color .3s ease, box-shadow .3s ease;
-}
-[class*="st-key-card_"]:hover {
-  transform: translateY(-4px); border-color: rgba(139,123,255,.5);
-  box-shadow: 0 22px 44px -22px rgba(139,123,255,.55);
-}
-[class*="st-key-task_"] {
-  border-radius: 16px; padding: .6rem 1rem .6rem 1.1rem; border-left: 4px solid rgba(255,255,255,.14);
-  margin-bottom: .15rem;
-}
-[class*="st-key-task_"]:hover { transform: translateX(3px); box-shadow: 0 14px 30px -20px rgba(0,0,0,.8); }
-[class*="st-key-task_late_"] { border-left-color: #FF8FA3; background: linear-gradient(90deg, rgba(255,107,129,.10), rgba(255,255,255,.02) 45%); }
-[class*="st-key-task_soon_"] { border-left-color: #FFC46B; }
-[class*="st-key-task_ok_"] { border-left-color: #5CE1C6; }
-[class*="st-key-task_done_"] { border-left-color: rgba(255,255,255,.14); opacity: .6; }
-[class*="st-key-task_done_"]:hover { opacity: 1; }
-.st-key-ph { padding: 1.7rem 1.8rem; margin-bottom: .6rem; }
+/* ---------- Boutons ---------- */
+.stButton button, .stDownloadButton button, .stFormSubmitButton button { border-radius:999px; border:1px solid var(--line); background:#fff;
+  min-height:2.6rem; box-shadow:0 1px 2px rgba(32,34,58,.05); transition:transform .18s ease, box-shadow .18s ease, background .18s ease; }
+.stButton button p, .stDownloadButton button p, .stFormSubmitButton button p { font-weight:600; }
+.stButton button:hover, .stDownloadButton button:hover { transform:translateY(-1px); box-shadow:0 8px 18px -10px rgba(32,34,58,.35); border-color:rgba(108,77,255,.35); background:#fff; }
+.stButton button[data-testid="stBaseButton-primary"], .stFormSubmitButton button { background:var(--grad); border:0; color:#fff; box-shadow:0 10px 22px -10px rgba(108,77,255,.7); }
+.stButton button[data-testid="stBaseButton-primary"] p, .stFormSubmitButton button p { color:#fff !important; }
+.stButton button[data-testid="stBaseButton-primary"]:hover { filter:saturate(1.15) brightness(1.04); }
+button:focus-visible { outline:3px solid rgba(108,77,255,.45) !important; outline-offset:2px; }
+button[data-testid="stPopoverButton"] > div:last-child { display:none; }
 
-.pc-name, .ph-title {
-  font-family: 'Bricolage Grotesque', sans-serif; font-weight: 700; font-size: 1.35rem;
-  letter-spacing: -0.02em; color: var(--text); display: flex; align-items: center; gap: .6rem;
-}
-.ph-title { font-size: 2.1rem; }
-.dot { width: .7rem; height: .7rem; border-radius: 50%; flex: none; box-shadow: 0 0 14px currentColor; }
-.pc-desc, .ph-desc { color: var(--muted); font-size: .92rem; margin: .5rem 0 1rem; min-height: 1.3rem; }
-.pc-bar { height: 7px; border-radius: 99px; background: rgba(255,255,255,.08); overflow: hidden; }
-.pc-bar > div { height: 100%; border-radius: 99px; transition: width .6s ease; }
-.pc-meta { display: flex; justify-content: space-between; align-items: center; margin: .9rem 0 .2rem; color: var(--muted); font-size: .86rem; font-weight: 600; }
+/* ---------- Tuiles bento ---------- */
+[class*="st-key-b_"] { background:var(--card); border-radius:var(--r); padding:1.25rem 1.35rem; box-shadow:var(--shadow); height:100%; border:1px solid rgba(255,255,255,.7); }
+[class*="st-key-b_"][class*="_peach"] { background:var(--peach); } [class*="st-key-b_"][class*="_lilac"] { background:var(--lilac); }
+[class*="st-key-b_"][class*="_mint"] { background:var(--mint); } [class*="st-key-b_"][class*="_butter"] { background:var(--butter); }
+.st-key-bento [data-testid="stHorizontalBlock"] { gap:1rem; align-items:stretch; }
+.st-key-bento [data-testid="stColumn"] > [data-testid="stVerticalBlock"] { gap:1rem; height:100%; }
+.hello { font-family:var(--head); font-weight:800; font-size:clamp(2.2rem, 5.5vw, 3.6rem); letter-spacing:-.04em; line-height:1; margin:.4rem 0 .3rem; }
+.hello span { background:var(--grad); -webkit-background-clip:text; background-clip:text; color:transparent; }
+.hello-sub { color:var(--muted); font-size:1.02rem; margin-bottom:1.2rem; }
+.t-label { font-family:var(--head); font-weight:600; font-size:.95rem; color:var(--muted); display:flex; align-items:center; justify-content:space-between; gap:.5rem; }
+.t-label .ic { width:2.2rem; height:2.2rem; border-radius:14px; display:inline-flex; align-items:center; justify-content:center; font-size:1.05rem; background:rgba(255,255,255,.7); }
+.t-big { font-family:var(--head); font-weight:800; font-size:clamp(2.2rem, 4vw, 3rem); letter-spacing:-.04em; line-height:1; margin:.7rem 0 .2rem; }
+.t-foot { font-size:.82rem; color:var(--muted); }
+.spark { display:flex; align-items:flex-end; gap:6px; height:64px; margin-top:.9rem; }
+.spark div { flex:1; display:flex; flex-direction:column; align-items:center; gap:4px; height:100%; justify-content:flex-end; }
+.spark i { display:block; width:100%; border-radius:8px; background:rgba(74,51,201,.25); min-height:4px; }
+.spark div.today i { background:var(--lilac-i); }
+.spark small { font-size:.62rem; color:var(--lilac-i); font-weight:700; }
+.h-tile { font-family:var(--head); font-weight:700; font-size:1.25rem; letter-spacing:-.02em; display:flex; justify-content:space-between; align-items:center; margin-bottom:.4rem; }
+.h-tile span { font-family:var(--body); font-size:.78rem; font-weight:700; background:var(--soft); color:var(--muted); padding:.2rem .6rem; border-radius:999px; }
+.h-page { font-family:var(--head); font-weight:800; font-size:clamp(2rem, 4.5vw, 2.8rem); letter-spacing:-.04em; margin:.2rem 0 .2rem; }
+.sub { color:var(--muted); margin-bottom:1rem; }
 
-.badge { padding: .2rem .65rem; border-radius: 99px; font-size: .78rem; font-weight: 700; white-space: nowrap; }
-.badge.late { background: rgba(255,107,129,.16); color: #FF8FA3; }
-.badge.soon { background: rgba(255,196,107,.16); color: #FFC46B; }
-.badge.ok { background: rgba(92,225,198,.14); color: #5CE1C6; }
-.badge.done { background: rgba(255,255,255,.08); color: var(--muted); }
+/* Pastilles d'échéance */
+.pill { display:inline-flex; align-items:center; gap:.3rem; font-size:.74rem; font-weight:700; padding:.22rem .62rem; border-radius:999px; white-space:nowrap; }
+.pill.late { background:var(--rose); color:var(--rose-i); } .pill.soon { background:var(--butter); color:var(--butter-i); }
+.pill.ok { background:var(--mint); color:var(--mint-i); } .pill.done { background:var(--soft); color:var(--muted); }
 
-.t-title { font-weight: 600; color: var(--text); }
-.t-title.done { text-decoration: line-through; color: var(--muted); }
-.owner { color: var(--muted); font-size: .85rem; font-weight: 600; }
-.date-small { color: var(--muted); font-size: .8rem; margin-left: .5rem; }
-.chip { display: inline-block; padding: .2rem .7rem; margin: .8rem .4rem 0 0; border-radius: 99px; background: rgba(139,123,255,.14); color: #CFC8FF; font-size: .82rem; font-weight: 600; }
-.empty { text-align: center; color: var(--muted); padding: 2.5rem 1rem; border: 1.5px dashed var(--line); border-radius: 20px; margin-top: 1rem; }
+/* Listes de tâches */
+[class*="st-key-task_"], [class*="st-key-focus_"] { background:var(--soft); border-radius:20px; padding:.55rem .7rem .55rem .8rem; margin-bottom:.1rem;
+  transition:background .15s ease, transform .15s ease; }
+[class*="st-key-task_"]:hover, [class*="st-key-focus_"]:hover { background:#fff; transform:translateY(-1px); box-shadow:0 8px 20px -14px rgba(32,34,58,.35); }
+[class*="st-key-task_"] [data-testid="stHorizontalBlock"], [class*="st-key-focus_"] [data-testid="stHorizontalBlock"] { gap:.5rem; }
+[class*="st-key-task_done_"] { opacity:.65; }
+.tt { font-weight:700; font-size:.96rem; line-height:1.3; }
+.tt.done { text-decoration:line-through; color:var(--muted); }
+.tm { display:flex; flex-wrap:wrap; align-items:center; gap:.35rem .5rem; margin-top:.3rem; font-size:.78rem; color:var(--muted); }
+.dotp { width:.55rem; height:.55rem; border-radius:50%; display:inline-block; }
+.av { width:1.6rem; height:1.6rem; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:.72rem; font-weight:800; color:#fff; flex:none; border:2px solid #fff; }
+.avs { display:flex; } .avs .av + .av { margin-left:-.45rem; }
+label[data-baseweb="checkbox"] > span:first-child { border-radius:50% !important; width:1.35rem; height:1.35rem; }
+[class*="st-key-task_"] button[data-testid="stPopoverButton"], [class*="st-key-focus_"] button[data-testid="stPopoverButton"] { min-height:2rem; padding:0 .6rem; background:#fff; border:1px solid var(--line); }
 
-/* Boutons */
-.stButton > button {
-  border-radius: 12px; border: 1px solid var(--line); background: rgba(255,255,255,.05);
-  color: var(--text); font-weight: 600; transition: all .25s ease;
-}
-.stButton > button:hover { border-color: var(--accent); background: rgba(139,123,255,.14); color: #fff; transform: translateY(-1px); }
-.stButton > button[data-testid="stBaseButton-primary"] {
-  background: linear-gradient(135deg, #8B7BFF, #6A58F0); border: none; color: #fff;
-  box-shadow: 0 10px 24px -12px rgba(139,123,255,.9);
-}
-.stButton > button[data-testid="stBaseButton-primary"]:hover { filter: brightness(1.1); }
-.stDownloadButton > button {
-  border-radius: 12px; border: 1px solid var(--line); background: rgba(255,255,255,.05);
-  color: var(--text); font-weight: 600; transition: all .25s ease;
-}
-.stDownloadButton > button:hover { border-color: var(--accent); background: rgba(139,123,255,.14); color: #fff; transform: translateY(-1px); }
-.st-key-add_tile button {
-  height: 100%; min-height: 200px; font-size: 1.15rem; border: 1.5px dashed rgba(139,123,255,.55);
-  background: rgba(139,123,255,.05); border-radius: 22px;
-}
-.st-key-add_tile button:hover { background: rgba(139,123,255,.14); transform: translateY(-4px); }
-.st-key-add_tile { height: 100%; }
+/* Projets (anneaux) */
+[class*="st-key-hit_"] { position:relative; gap:0 !important; }
+[class*="st-key-hit_"] [data-testid="stElementContainer"]:has(button) { position:absolute; inset:0; z-index:3; margin:0; width:100% !important; height:100%; }
+[class*="st-key-hit_"] .stButton, [class*="st-key-hit_"] .stButton button { width:100%; height:100%; min-height:0; }
+[class*="st-key-hit_"] .stButton button { opacity:0; padding:0; border:0; cursor:pointer; }
+.ring-mini { display:flex; align-items:center; gap:.75rem; padding:.55rem .6rem; border-radius:20px; transition:background .15s ease; }
+[class*="st-key-hit_"]:hover .ring-mini { background:var(--soft); }
+.ring-mini b { display:block; font-size:.92rem; } .ring-mini small { color:var(--muted); font-size:.76rem; }
+.pcard { background:#fff; border-radius:var(--r); overflow:hidden; box-shadow:var(--shadow); transition:transform .2s ease, box-shadow .2s ease; }
+[class*="st-key-hit_"]:hover .pcard { transform:translateY(-4px); box-shadow:0 24px 44px -20px rgba(32,34,58,.35); }
+.pcard-top { height:84px; position:relative; }
+.pcard-top .ringwrap { position:absolute; right:1.1rem; bottom:-30px; background:#fff; border-radius:50%; padding:5px; box-shadow:0 8px 20px -10px rgba(32,34,58,.4); }
+.pcard-body { padding:1rem 1.2rem 1.2rem; }
+.pcard-n { font-family:var(--head); font-weight:700; font-size:1.3rem; letter-spacing:-.02em; padding-right:4.2rem; line-height:1.15; }
+.pcard-d { color:var(--muted); font-size:.86rem; margin:.35rem 0 .9rem; min-height:2.4rem; }
+.pcard-f { display:flex; align-items:center; justify-content:space-between; gap:.5rem; }
+.st-key-add_tile button { min-height:218px; border:2px dashed rgba(108,77,255,.35) !important; background:rgba(255,255,255,.45) !important; border-radius:var(--r) !important; }
+.st-key-add_tile button p { font-family:var(--head) !important; font-size:1.15rem !important; color:var(--violet) !important; }
+.st-key-grid [data-testid="stHorizontalBlock"] { gap:1.2rem; }
+.st-key-grid [data-testid="stVerticalBlock"] { gap:1.2rem; }
 
-[data-testid="stDialog"] div[role="dialog"] { border-radius: 24px; border: 1px solid rgba(139,123,255,.25); box-shadow: 0 24px 80px rgba(0,0,0,.35); }
-[data-testid="stDialog"] [data-testid="stMarkdownContainer"] h1,
-[data-testid="stDialog"] [data-testid="stMarkdownContainer"] h2 { letter-spacing: -.03em; }
-.stSelectSlider [data-baseweb="slider"] { padding-top: .6rem; padding-bottom: .6rem; }
-[data-testid="stMetric"] { background: linear-gradient(145deg,rgba(139,123,255,.13),rgba(255,255,255,.035)); border:1px solid var(--line); border-radius:18px; padding:1rem 1.1rem; }
+/* Vue projet */
+.st-key-phero { border-radius:var(--r); padding:1.6rem 1.7rem; box-shadow:var(--shadow); position:relative; overflow:hidden; }
+.ph { display:flex; gap:1.4rem; align-items:center; }
+.ph-n { font-family:var(--head); font-weight:800; font-size:clamp(1.9rem, 4.5vw, 2.8rem); letter-spacing:-.04em; line-height:1.02; }
+.ph-d { color:var(--muted); margin:.4rem 0 .8rem; max-width:40rem; }
+.ph-m { display:flex; flex-wrap:wrap; gap:.5rem .9rem; align-items:center; font-size:.85rem; color:var(--muted); }
+.st-key-back button { background:rgba(255,255,255,.6) !important; }
+.st-key-cols [data-testid="stHorizontalBlock"] { gap:1.2rem; }
+.colh { font-family:var(--head); font-weight:700; font-size:1.1rem; display:flex; align-items:center; gap:.5rem; margin:.2rem 0 .5rem; }
+.colh span { background:#fff; border-radius:999px; font-size:.76rem; padding:.1rem .55rem; color:var(--muted); }
+.empty { text-align:center; color:var(--muted); padding:2rem 1rem; border:2px dashed rgba(108,77,255,.25); border-radius:var(--r); background:rgba(255,255,255,.4); }
 
-/* Sidebar : avancement des projets */
-[data-testid="stSidebar"] { background: rgba(22,24,48,.65); border-right: 1px solid var(--line); backdrop-filter: blur(14px); }
-.side-title { font-family: 'Bricolage Grotesque', sans-serif; font-weight: 700; font-size: 1.4rem; letter-spacing: -0.02em; color: var(--text); margin: .4rem 0 1.1rem; }
-.ring-row { display: flex; align-items: center; gap: .9rem; padding: .7rem .8rem; margin-bottom: 0; border-radius: 18px; transition: all .25s ease; background: rgba(255,255,255,.04); border: 1px solid var(--line); }
-.ring-row.active { border-color: rgba(139,123,255,.55); background: rgba(139,123,255,.09); }
-.ring-row svg { flex: none; }
-.ring-fg { transition: stroke-dasharray .8s ease; }
-.ring-name { font-weight: 700; color: var(--text); font-size: .95rem; line-height: 1.2; }
-.ring-sub { color: var(--muted); font-size: .8rem; margin-top: .15rem; }
-.by { color: var(--muted); font-size: .76rem; margin-top: .1rem; }
+/* Planning */
+.seg { display:flex; gap:.3rem; }
+.st-key-seg [data-testid="stHorizontalBlock"] { gap:.4rem; align-items:center; }
+.period { font-family:var(--head); font-weight:700; font-size:1.3rem; text-align:center; letter-spacing:-.02em; }
+.legend { display:flex; gap:1rem; justify-content:center; font-size:.8rem; color:var(--muted); margin:.3rem 0 .6rem; }
+.legend i { display:inline-block; width:.7rem; height:.7rem; border-radius:50%; margin-right:.35rem; vertical-align:-1px; }
+.st-key-week [data-testid="stHorizontalBlock"] { gap:.55rem; }
+.wk { background:#fff; border-radius:22px; height:168px; padding:.6rem .4rem .5rem; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; box-shadow:var(--shadow); }
+.wk.sel { background:var(--ink); } .wk.sel .t, .wk.sel .dt { color:#fff; }
+.wk .t { font-size:.72rem; font-weight:700; margin-bottom:.4rem; color:var(--ink); }
+.wk .bar { width:26px; height:96px; border-radius:13px; background:var(--soft); overflow:hidden; display:flex; flex-direction:column; justify-content:flex-end; }
+.wk.sel .bar { background:rgba(255,255,255,.12); }
+.wk .bar .o { background:var(--grad); } .wk .bar .d { background:#7BD8B3; }
+.wk .dt { font-size:.72rem; color:var(--muted); margin-top:.45rem; font-weight:600; }
+.wk.today .dt::after { content:" •"; color:var(--coral); }
+.st-key-week .stButton button { min-height:2.1rem; }
+.mh { text-align:center; font-size:.74rem; font-weight:700; color:var(--muted); }
+.st-key-month [data-testid="stHorizontalBlock"] { gap:.4rem; }
+.st-key-month [data-testid="stVerticalBlock"] { gap:.4rem; }
+.mc { background:#fff; border-radius:16px; height:70px; padding:.4rem .5rem; display:flex; flex-direction:column; justify-content:space-between; box-shadow:0 1px 2px rgba(32,34,58,.05); }
+.mc b { font-size:.86rem; } .mc span { font-size:.66rem; color:var(--muted); font-weight:600; }
+.mc .dots { display:flex; gap:3px; } .mc .dots i { width:6px; height:6px; border-radius:50%; background:var(--violet); }
+.mc .dots i.d { background:#7BD8B3; }
+.mc.out { opacity:.35; } .mc.sel { background:var(--ink); } .mc.sel b, .mc.sel span { color:#fff; }
+.mc.today b { color:var(--coral); }
 
-/* Projets cliquables dans la sidebar : le bouton invisible recouvre toute la carte */
-[class*="st-key-navc_"] { position: relative; margin-bottom: .6rem; gap: 0 !important; }
-[class*="st-key-navc_"] [data-testid="stElementContainer"]:has(button) {
-  position: absolute; inset: 0; z-index: 3; margin: 0; width: 100%; height: 100%;
-}
-[class*="st-key-navc_"] [data-testid="stElementContainer"]:has(button) .stButton,
-[class*="st-key-navc_"] [data-testid="stElementContainer"]:has(button) .stButton > button {
-  width: 100%; height: 100%; min-height: 0;
-}
-[class*="st-key-navc_"] .stButton > button { opacity: 0; cursor: pointer; padding: 0; border: 0; }
-[class*="st-key-navc_"]:hover .ring-row,
-[class*="st-key-navc_"]:focus-within .ring-row {
-  border-color: rgba(139,123,255,.7); background: rgba(139,123,255,.12); transform: translateX(3px);
-}
-[class*="st-key-navc_"] .stButton > button:focus-visible { opacity: .01; outline: 2px solid #8B7BFF; outline-offset: -3px; }
-.mt-row { display: flex; align-items: center; gap: .8rem; padding: .7rem 1rem; margin-bottom: .5rem; border-radius: 14px; background: rgba(255,255,255,.04); border: 1px solid var(--line); }
-.mt-row .t-title { flex: 1; }
+/* Dialogues */
+[data-testid="stDialog"] div[role="dialog"] { border-radius:32px; border:0; box-shadow:0 30px 80px -20px rgba(32,34,58,.45); }
+[data-testid="stDialog"] h2 { font-family:var(--head) !important; font-weight:800 !important; letter-spacing:-.03em; }
+.dialog-intro { display:flex; align-items:center; gap:.6rem; font-family:var(--head); font-weight:700; font-size:1rem; margin:1rem 0 .3rem; }
+.dialog-intro b { background:var(--lilac); color:var(--lilac-i); border-radius:10px; padding:.1rem .45rem; font-size:.78rem; }
+.stTextInput input, .stTextArea textarea, .stDateInput input { border-radius:14px !important; }
+[data-baseweb="input"], [data-baseweb="textarea"], [data-baseweb="select"] > div { border-radius:14px !important; }
+[data-testid="stForm"] { border:0; padding:0; }
+[data-testid="stPopoverBody"] { border-radius:20px; }
 
-/* Lignes de tâches */
-.sec { display: flex; align-items: center; gap: .6rem; color: var(--muted); font-size: .9rem; font-weight: 700; margin: 1.5rem 0 .6rem; }
-.sec span { background: rgba(255,255,255,.08); border-radius: 99px; padding: .05rem .6rem; font-size: .78rem; }
-.avatar { display: inline-flex; align-items: center; justify-content: center; width: 1.7rem; height: 1.7rem; border-radius: 50%; font-size: .78rem; font-weight: 700; margin-right: .55rem; vertical-align: middle; }
-[class*="st-key-task_"] .t-title { font-size: 1rem; }
-[class*="st-key-task_"] label[data-baseweb="checkbox"] > span:first-child { border-radius: 50%; width: 1.4rem; height: 1.4rem; }
-[class*="st-key-task_"] button[data-testid="stPopoverButton"] {
-  background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.18); color: var(--text);
-  min-height: 2.2rem; min-width: 3rem; padding: 0 .6rem; justify-content: center; border-radius: 10px; box-shadow: none;
-}
-[class*="st-key-task_"] button[data-testid="stPopoverButton"]:hover { background: rgba(139,123,255,.22); border-color: rgba(139,123,255,.7); color: #fff; transform: none; }
+/* Compte */
+.acc { display:flex; align-items:center; gap:1rem; }
+.acc .avatar-me { width:3.4rem; height:3.4rem; font-size:1.4rem; margin:0; }
+.acc b { font-family:var(--head); font-size:1.3rem; } .acc small { display:block; color:var(--mint-i); font-weight:600; }
+.login { text-align:center; margin:12vh auto 1.4rem; max-width:34rem; }
+.login .hello { font-size:clamp(3rem, 10vw, 5rem); }
+.login p { color:var(--muted); font-size:1.1rem; }
 
-/* Sélecteur de langue */
-.st-key-lang [role="radiogroup"] { gap: .35rem; justify-content: flex-end; }
-.st-key-lang label { background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.28); border-radius: 999px; padding: .2rem .95rem; transition: all .25s ease; cursor: pointer; }
-.st-key-lang label p, .st-key-lang label div { color: #ECEBFF !important; font-weight: 700; font-size: .85rem; }
-.st-key-lang label:hover { border-color: rgba(139,123,255,.85); }
-.st-key-lang label:has(input:checked) { background: linear-gradient(135deg, #8B7BFF, #6A58F0); border-color: transparent; box-shadow: 0 8px 20px -10px rgba(139,123,255,.9); }
-.st-key-lang label:has(input:checked) p, .st-key-lang label:has(input:checked) div { color: #fff !important; }
-.st-key-lang label > div:first-child { display: none; }
-[data-testid="stForm"] { border: none; padding: 0; }
-.stFormSubmitButton > button {
-  border-radius: 12px; border: none; background: linear-gradient(135deg, #8B7BFF, #6A58F0); color: #fff;
-  font-weight: 600; box-shadow: 0 10px 24px -12px rgba(139,123,255,.9); transition: all .25s ease;
-}
-.stFormSubmitButton > button:hover { filter: brightness(1.1); transform: translateY(-1px); }
-/* Tablette : 2 projets par ligne, espacements réduits */
 @media (max-width: 1024px) {
-  .block-container { padding-left: 1.2rem; padding-right: 1.2rem; padding-top: 1.5rem; }
-  .st-key-board [data-testid="stHorizontalBlock"] { flex-wrap: wrap !important; gap: 1rem !important; }
-  .st-key-board [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
-  .st-key-board [data-testid="stHorizontalBlock"] > [data-testid="column"] {
-    flex: 1 1 calc(50% - 1rem) !important; width: calc(50% - 1rem) !important; min-width: calc(50% - 1rem) !important;
-  }
-  .st-key-add_tile button { min-height: 120px; }
-  [class*="st-key-card_"] { padding: 1.1rem 1.2rem; }
+  .st-key-grid [data-testid="stHorizontalBlock"], .st-key-bento [data-testid="stHorizontalBlock"] { flex-wrap:wrap !important; }
+  .st-key-grid [data-testid="stColumn"] { flex:1 1 calc(50% - 1.2rem) !important; min-width:calc(50% - 1.2rem) !important; }
+  .st-key-bento [data-testid="stColumn"] { flex:1 1 100% !important; min-width:100% !important; }
 }
-/* Mobile : 1 projet par ligne */
-@media (max-width: 640px) {
-  .st-key-board [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
-  .st-key-board [data-testid="stHorizontalBlock"] > [data-testid="column"] {
-    flex: 1 1 100% !important; width: 100% !important; min-width: 100% !important;
-  }
-  .st-key-add_tile button { min-height: 80px; }
-  [class*="st-key-task_"] [data-testid="stVerticalBlock"] { gap: .4rem; }
+@media (max-width: 760px) {
+  .block-container { padding:3.4rem .8rem 4rem; }
+  .st-key-topbar { border-radius:26px; padding:.5rem; }
+  .st-key-topbar [data-testid="stHorizontalBlock"] { flex-wrap:wrap !important; }
+  .st-key-topbar { position:relative; top:0; }
+  .st-key-topbar [data-testid="stHorizontalBlock"] { row-gap:.3rem !important; }
+  .st-key-topbar [data-testid="stColumn"] { min-width:0 !important; flex:1 1 22% !important; width:auto !important; }
+  .st-key-topbar [data-testid="stColumn"]:first-child { flex:1 1 55% !important; padding-left:.6rem; }
+  .st-key-topbar [data-testid="stColumn"]:nth-child(6) { order:-1; flex:0 0 auto !important; }
+  .st-key-topbar [data-testid="stColumn"]:first-child { order:-2; }
+  .st-key-topbar [data-testid="stColumn"]:has(.avatar-me) { display:none; }
+  [class*="st-key-tab_"] button { padding:0 .2rem !important; min-height:2.3rem; }
+  .stApp [class*="st-key-task_"] [data-testid="stHorizontalBlock"], .stApp [class*="st-key-focus_"] [data-testid="stHorizontalBlock"] { flex-wrap:nowrap !important; }
+  .stApp [class*="st-key-task_"] [data-testid="stHorizontalBlock"] > [data-testid="stColumn"], .stApp [class*="st-key-focus_"] [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] { min-width:0 !important; }
+  .stApp [class*="st-key-task_"] [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child, .stApp [class*="st-key-focus_"] [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child { flex:0 0 1.8rem !important; }
+  .stApp [class*="st-key-task_"] [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child, .stApp [class*="st-key-focus_"] [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child { flex:0 0 2.6rem !important; }
+  .stApp [class*="st-key-task_"] [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2), .stApp [class*="st-key-focus_"] [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2) { flex:1 1 auto !important; width:auto !important; }
+  .st-key-bento [data-testid="stColumn"] [data-testid="stHorizontalBlock"] { flex-wrap:nowrap !important; }
+  .st-key-bento [data-testid="stColumn"] [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] { min-width:0 !important; }
+  [class*="st-key-tab_"] button p { font-size:.8rem !important; }
+  .st-key-grid [data-testid="stColumn"], .st-key-cols [data-testid="stColumn"] { flex:1 1 100% !important; min-width:100% !important; }
+  .st-key-week [data-testid="stHorizontalBlock"], .st-key-month [data-testid="stHorizontalBlock"] { flex-wrap:nowrap !important; gap:.2rem; }
+  .st-key-week [data-testid="stColumn"], .st-key-month [data-testid="stColumn"] { min-width:0 !important; flex:1 1 0 !important; }
+  .wk { height:118px; border-radius:14px; } .wk .bar { height:60px; width:14px; } .wk .t { font-size:.56rem; }
+  .st-key-week .stButton button p { font-size:.66rem !important; }
+  .mc { height:48px; padding:.2rem; border-radius:10px; } .mc span { display:none; }
+  .ph { flex-direction:column; align-items:flex-start; }
 }
-
-/* Navigation principale : deux véritables onglets/cartes */
-.st-key-main_navigation { margin: 1.2rem 0 1.8rem; }
-.st-key-main_navigation [role="radiogroup"] {
-  display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .85rem !important;
-  width: 100%;
-}
-.st-key-main_navigation [role="radiogroup"] label {
-  min-height: 76px; display: flex; align-items: center; justify-content: center;
-  padding: 1rem 1.4rem !important; border-radius: 18px !important;
-  border: 1px solid rgba(255,255,255,.14) !important;
-  background: linear-gradient(145deg,rgba(255,255,255,.075),rgba(255,255,255,.025)) !important;
-  box-shadow: 0 10px 28px rgba(0,0,0,.12); transition: all .22s ease;
-}
-.st-key-main_navigation [role="radiogroup"] label p,
-.st-key-main_navigation [role="radiogroup"] label div { color: #D8D7F2 !important; font-size: 1.08rem !important; font-weight: 800 !important; }
-.st-key-main_navigation [role="radiogroup"] label:has(input:checked) {
-  border-color: rgba(139,123,255,.85) !important;
-  background: linear-gradient(120deg,rgba(139,123,255,.30),rgba(255,143,163,.12)) !important;
-  box-shadow: 0 12px 34px rgba(139,123,255,.2), inset 0 0 0 1px rgba(139,123,255,.18);
-}
-.st-key-main_navigation [role="radiogroup"] label:has(input:checked) p,
-.st-key-main_navigation [role="radiogroup"] label:has(input:checked) div { color: #FFFFFF !important; }
-.st-key-main_navigation [role="radiogroup"] label:hover { border-color: rgba(139,123,255,.65) !important; transform: translateY(-2px); }
-.st-key-main_navigation [role="radiogroup"] label > div:first-child { display: none; }
-
-/* Lisibilité renforcée dans les dialogues et la charge de travail */
-[data-testid="stDialog"] [data-testid="stMarkdownContainer"] p,
-[data-testid="stDialog"] [data-testid="stMarkdownContainer"] li { color: #DAD9F0; }
-[data-testid="stDialog"] label, [data-testid="stDialog"] [data-testid="stWidgetLabel"] p { color: #E4E2FA !important; font-weight: 600; }
-[data-testid="stDialog"] input, [data-testid="stDialog"] textarea,
-[data-testid="stDialog"] [data-baseweb="select"] * { color: #F1F0FF !important; }
-[data-testid="stDialog"] [data-testid="stCaptionContainer"] { color: #B7B7D5 !important; }
-.st-key-edit_duration_dummy { color: #fff; }
-.st-key-workload_daily, .st-key-workload_weekly {
-  background: linear-gradient(145deg,rgba(139,123,255,.095),rgba(255,255,255,.025));
-  border: 1px solid rgba(255,255,255,.09); border-radius: 22px;
-  padding: 1rem 1.15rem .65rem; margin: .65rem 0 1.15rem;
-  box-shadow: 0 16px 38px rgba(0,0,0,.12);
-}
-.st-key-workload_daily [data-testid="stMarkdownContainer"] h3,
-.st-key-workload_weekly [data-testid="stMarkdownContainer"] h3 { color: #F0EEFF; }
-.st-key-workload_daily [data-testid="stCaptionContainer"],
-.st-key-workload_weekly [data-testid="stCaptionContainer"] { color: #B9B8D8 !important; }
-.st-key-workload_daily .js-plotly-plot, .st-key-workload_weekly .js-plotly-plot { border-radius: 16px; overflow: hidden; }
-.st-key-workload_daily .stPlotlyChart, .st-key-workload_weekly .stPlotlyChart { background: transparent !important; }
-[data-testid="stMetric"] [data-testid="stMetricLabel"] { color: #C4C2E2 !important; }
-[data-testid="stMetric"] [data-testid="stMetricValue"] { color: #FFFFFF !important; }
-.st-key-task_edit_dialog_dummy { color: #fff; }
-
-/* Compte et connexion Google dans la sidebar */
-[data-testid="stSidebar"] [data-testid="stCaptionContainer"] { color: #C4C3E0 !important; }
-[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p { color: #E2E0F7; }
-[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] a { color: #B9AEFF !important; font-weight: 700; }
-[data-testid="stSidebar"] .side-title { color: #F0EEFF; }
-
-/* Dialogues plus nets, sans changer leur structure */
-[data-testid="stDialog"] [data-testid="stTextInput"] input,
-[data-testid="stDialog"] [data-testid="stTextArea"] textarea,
-[data-testid="stDialog"] [data-testid="stDateInput"] input { background: rgba(255,255,255,.055); border-color: rgba(255,255,255,.16); }
-[data-testid="stDialog"] [data-testid="stForm"] { display: flex; flex-direction: column; gap: .35rem; }
-[data-testid="stDialog"] hr { border-color: rgba(255,255,255,.10); margin: 1.1rem 0; }
-.dialog-intro { color:#DCD9FF; font-size:.9rem; font-weight:800; letter-spacing:.035em; padding:.7rem .9rem; margin:.55rem 0 .8rem; border-left:3px solid #8B7BFF; border-radius:0 12px 12px 0; background:linear-gradient(90deg,rgba(139,123,255,.14),rgba(139,123,255,.015)); }
-.dialog-intro span { color:#FF8FA3; padding:0 .2rem; }
-@media (max-width: 640px) {
-  .st-key-main_navigation [role="radiogroup"] { grid-template-columns: 1fr; }
-  .st-key-main_navigation [role="radiogroup"] label { min-height: 60px; }
-  .st-key-workload_daily, .st-key-workload_weekly { padding: .7rem; }
-}
-
-/* Contraste renforcé : charge de travail, formulaires et compte connecté */
-.st-key-workload_daily, .st-key-workload_weekly {
-  background: linear-gradient(145deg, rgba(30,29,61,.92), rgba(22,24,48,.88));
-  border: 1px solid rgba(157,143,255,.24); border-radius: 22px;
-  padding: 1.15rem 1.25rem .85rem; margin: .8rem 0 1.1rem;
-  box-shadow: 0 14px 36px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.035);
-}
-.st-key-workload_daily [data-testid="stMarkdownContainer"] h3,
-.st-key-workload_weekly [data-testid="stMarkdownContainer"] h3 { color:#FFFFFF !important; font-size:1.08rem; }
-.st-key-workload_daily [data-testid="stMarkdownContainer"] p,
-.st-key-workload_weekly [data-testid="stMarkdownContainer"] p,
-.st-key-workload_daily [data-testid="stCaptionContainer"],
-.st-key-workload_weekly [data-testid="stCaptionContainer"] { color:#C9C7E5 !important; }
-.st-key-workload_daily .stPlotlyChart, .st-key-workload_weekly .stPlotlyChart,
-.st-key-workload_daily [data-testid="stPlotlyChart"], .st-key-workload_weekly [data-testid="stPlotlyChart"] { background:transparent !important; }
-.st-key-workload_daily .js-plotly-plot, .st-key-workload_weekly .js-plotly-plot { border-radius:14px; overflow:hidden; }
-.st-key-workload_daily [data-testid="stAlert"], .st-key-workload_weekly [data-testid="stAlert"] { background:rgba(255,255,255,.045); }
-/* Navigation : deux pages principales, plus grandes et immédiatement identifiables */
-.st-key-main_navigation { margin:1.35rem 0 2rem !important; }
-.st-key-main_navigation [role="radiogroup"] { gap:1rem !important; }
-.st-key-main_navigation [role="radiogroup"] label {
-  min-height:98px !important; padding:1.35rem 1.7rem !important;
-  border-radius:22px !important; border:1px solid rgba(174,161,255,.25) !important;
-  background:linear-gradient(145deg,rgba(42,40,78,.92),rgba(27,28,54,.94)) !important;
-  box-shadow:0 12px 30px rgba(0,0,0,.2), inset 0 1px 0 rgba(255,255,255,.045);
-}
-.st-key-main_navigation [role="radiogroup"] label p,
-.st-key-main_navigation [role="radiogroup"] label div { color:#E5E2FF !important; font-size:1.25rem !important; font-weight:850 !important; letter-spacing:-.02em; }
-.st-key-main_navigation [role="radiogroup"] label:has(input:checked) {
-  background:linear-gradient(115deg,rgba(139,123,255,.38),rgba(91,75,174,.25)) !important;
-  border-color:rgba(177,163,255,.85) !important;
-  box-shadow:0 14px 34px rgba(139,123,255,.2),inset 0 0 0 1px rgba(177,163,255,.2);
-}
-.st-key-main_navigation [role="radiogroup"] label:hover { transform:translateY(-3px); }
-/* Les textes de l'édition de tâche doivent rester lisibles */
-[data-testid="stDialog"] [data-testid="stMarkdownContainer"] p,
-[data-testid="stDialog"] [data-testid="stMarkdownContainer"] strong,
-[data-testid="stDialog"] [data-testid="stWidgetLabel"] p,
-[data-testid="stDialog"] label p { color:#F0EEFF !important; }
-[data-testid="stDialog"] [data-testid="stCaptionContainer"] { color:#C7C4E4 !important; }
-[data-testid="stDialog"] [data-baseweb="slider"] [role="slider"] { background:#A99AFF !important; }
-.account-status { color:#F0EEFF; font-size:.9rem; font-weight:750; padding:.65rem .8rem; margin:.9rem 0 .5rem; border-radius:12px; background:rgba(92,225,198,.08); border:1px solid rgba(92,225,198,.2); }
-/* Bloc compte Google : contraste et hiérarchie */
-[data-testid="stSidebar"] [data-testid="stCaptionContainer"],
-[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p { color:#E5E3FA !important; }
-[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] a { color:#C6BCFF !important; text-decoration:none; }
-[data-testid="stSidebar"] .side-title { color:#FFFFFF !important; }
-[data-testid="stSidebar"] [data-testid="stCaptionContainer"] a { color:#C6BCFF !important; }
-/* Dialogues de création / édition : finition légère */
-[data-testid="stDialog"] div[role="dialog"] { background:linear-gradient(155deg,#20213F,#191A32); }
-[data-testid="stDialog"] [data-testid="stTextInput"] input,
-[data-testid="stDialog"] [data-testid="stTextArea"] textarea,
-[data-testid="stDialog"] [data-testid="stDateInput"] input { border-radius:12px; }
-[data-testid="stDialog"] .stMultiSelect [data-baseweb="tag"] { background:rgba(139,123,255,.24); border:1px solid rgba(173,160,255,.28); }
-@media (max-width:640px) {
-  .st-key-main_navigation [role="radiogroup"] label { min-height:72px !important; padding:.9rem !important; }
-  .st-key-main_navigation [role="radiogroup"] label p,
-  .st-key-main_navigation [role="radiogroup"] label div { font-size:1.05rem !important; }
-  .st-key-workload_daily, .st-key-workload_weekly { padding:.8rem; }
-}
-
-/* Contraste explicite de tous les textes de la page Charge de travail */
-.st-key-workload_page [data-testid="stMarkdownContainer"],
-.st-key-workload_page [data-testid="stMarkdownContainer"] p,
-.st-key-workload_page [data-testid="stCaptionContainer"],
-.st-key-workload_page [data-testid="stCaptionContainer"] p,
-.st-key-workload_page [data-testid="stWidgetLabel"] p { color:#DCD9F5 !important; }
-.st-key-workload_page h1, .st-key-workload_page h2, .st-key-workload_page h3,
-.st-key-workload_page h4 { color:#FFFFFF !important; }
-.st-key-workload_page .workload-muted { color:#C5C2E2 !important; }
-.st-key-workload_page .workload-project { color:#C9C2FF !important; font-weight:750; }
-.st-key-workload_page .workload-deadline { color:#D5D2EC !important; }
-.st-key-workload_page [class*="st-key-task_"] { cursor:pointer; }
-.st-key-workload_page [class*="st-key-task_done_"] {
-  border-left-color:#5CE1C6 !important;
-  background:linear-gradient(90deg,rgba(92,225,198,.12),rgba(255,255,255,.025) 48%) !important;
-  opacity:.82;
-}
-.st-key-workload_page [class*="st-key-task_done_"] .t-title { color:#BDBBD2 !important; }
-.st-key-workload_page [class*="st-key-task_done_"] .owner,
-.st-key-workload_page [class*="st-key-task_done_"] .date-small { color:#AAA8C5 !important; }
-.st-key-workload_page [class*="st-key-workload_open_"] button {
-  background:transparent !important; border:0 !important; box-shadow:none !important;
-  color:#F0EEFF !important; text-align:left !important; padding:.1rem 0 !important;
-  font-weight:750 !important; min-height:unset !important;
-}
-.st-key-workload_page [class*="st-key-workload_open_"] button:hover { color:#BDB1FF !important; transform:none !important; }
-.st-key-workload_page .stPlotlyChart { background:transparent !important; }
-
-
-/* Palette alignée sur .streamlit/config.toml : fond #0D0E1C, texte #9DB0FF. */
-.st-key-workload_page { color:#9DB0FF !important; }
-.st-key-workload_page [data-testid="stMarkdownContainer"] p,
-.st-key-workload_page [data-testid="stCaptionContainer"],
-.st-key-workload_page [data-testid="stCaptionContainer"] p,
-.st-key-workload_page [data-testid="stWidgetLabel"] p { color:#9DB0FF !important; }
-.st-key-workload_page h1, .st-key-workload_page h2, .st-key-workload_page h3,
-.st-key-workload_page h4 { color:#E5E9FF !important; }
-.st-key-workload_page [data-testid="stMetricLabel"] { color:#9DB0FF !important; }
-.st-key-workload_page [data-testid="stMetricValue"] { color:#F4F5FF !important; }
-.st-key-workload_page .workload-project { color:#B8B0FF !important; }
-.st-key-workload_page .workload-deadline { color:#AFC0FF !important; }
-
-/* Les cartes workload reprennent le rythme et la structure visuelle des tâches du board. */
-.st-key-workload_page [class*="st-key-workload_task_"] {
-  padding:.55rem .75rem !important; margin:.35rem 0 !important;
-  border:1px solid rgba(157,176,255,.14) !important; border-left:3px solid #8B7BFF !important;
-  border-radius:14px !important; background:linear-gradient(100deg,rgba(139,123,255,.105),rgba(22,24,48,.58)) !important;
-  transition:border-color .18s ease, background .18s ease;
-}
-.st-key-workload_page [class*="st-key-workload_task_"]:hover {
-  border-color:rgba(157,176,255,.38) !important; background:linear-gradient(100deg,rgba(139,123,255,.17),rgba(22,24,48,.72)) !important;
-}
-.st-key-workload_page [class*="st-key-workload_task_completed_"] {
-  border-left-color:#5CE1C6 !important;
-  background:linear-gradient(100deg,rgba(92,225,198,.105),rgba(22,24,48,.55)) !important;
-}
-.st-key-workload_page [class*="st-key-workload_task_selected_day_"] { border-left-color:#8B7BFF !important; }
-.st-key-workload_page [class*="st-key-workload_open_"] button {
-  color:#E5E9FF !important; font-weight:750 !important; text-align:left !important;
-}
-.st-key-workload_page [class*="st-key-workload_task_completed_"] [class*="st-key-workload_open_"] button { color:#9DB0B8 !important; }
-
-/* Masque le contrôle radio (cercle / coche) sans supprimer les deux onglets. */
-.st-key-main_navigation [role="radiogroup"] label > div:first-child,
-.st-key-main_navigation [role="radio"] > div:first-child,
-.st-key-main_navigation [data-baseweb="radio"],
-.st-key-main_navigation input[type="radio"],
-.st-key-main_navigation [role="radio"] svg { display:none !important; }
-.st-key-main_navigation [role="radiogroup"] label { gap:0 !important; }
-
-/* Dialogues : amélioration de la hiérarchie visuelle et des espacements.
-   Les couleurs restent celles du thème Streamlit, comme dans la version précédente. */
-[data-testid="stDialog"] div[role="dialog"] { font-family:'Manrope',sans-serif; }
-[data-testid="stDialog"] [data-testid="stMarkdownContainer"] h1,
-[data-testid="stDialog"] [data-testid="stMarkdownContainer"] h2,
-[data-testid="stDialog"] [data-testid="stMarkdownContainer"] h3 {
-  font-family:'Bricolage Grotesque',sans-serif; letter-spacing:-.025em;
-}
-[data-testid="stDialog"] [data-testid="stTextInput"],
-[data-testid="stDialog"] [data-testid="stTextArea"],
-[data-testid="stDialog"] [data-testid="stDateInput"],
-[data-testid="stDialog"] [data-testid="stSelectbox"],
-[data-testid="stDialog"] [data-testid="stMultiSelect"] { margin-bottom:.45rem; }
-[data-testid="stDialog"] [data-testid="stTextInput"] input,
-[data-testid="stDialog"] [data-testid="stTextArea"] textarea,
-[data-testid="stDialog"] [data-testid="stDateInput"] input {
-  border-radius:13px; min-height:2.8rem;
-}
-[data-testid="stDialog"] [data-testid="stForm"] { gap:.65rem; }
-[data-testid="stDialog"] [data-testid="stFormSubmitButton"] button,
-[data-testid="stDialog"] .stButton button { min-height:2.8rem; border-radius:13px; font-weight:750; }
-[data-testid="stDialog"] .dialog-intro {
-  font-family:'Bricolage Grotesque',sans-serif; font-size:.96rem;
-  padding:.85rem 1rem; margin:1rem 0 .7rem; border-radius:0 14px 14px 0;
-}
-[data-testid="stDialog"] [data-testid="stHorizontalBlock"] { gap:1rem; }
-
-/* Navigation par segmented control : plus de bouton radio donc aucune coche. */
-
-.st-key-main_navigation [data-testid="stSegmentedControl"] {
-  width:100%; padding:.35rem; border:1px solid rgba(139,123,255,.22);
-  border-radius:18px; background:rgba(22,24,48,.88);
-}
-.st-key-main_navigation [data-testid="stSegmentedControl"] button {
-  min-height:3.35rem; border-radius:13px !important; font-size:1.08rem; font-weight:800;
-}
-.st-key-main_navigation [data-testid="stSegmentedControl"] button[aria-pressed="true"] {
-  background:linear-gradient(120deg,rgba(139,123,255,.42),rgba(255,143,163,.13)) !important;
-  box-shadow:inset 0 0 0 1px rgba(139,123,255,.4);
-}
-.st-key-workload_page .workload-period-label { text-align:center; color:#F0EEFF; font-weight:800; font-size:1.08rem; padding:.45rem; }
-.st-key-workload_page .workload-legend { display:flex; justify-content:center; gap:1.3rem; flex-wrap:wrap; margin:.25rem 0 1rem; color:#9DB0FF; font-size:.86rem; }
-.st-key-workload_page .workload-legend span:first-child { color:#CFC8FF; }
-.st-key-workload_page .workload-legend span:last-child { color:#5CE1C6; }
-.st-key-workload_page .workload-day-card { height:142px; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; padding:9px 5px 7px; border:1px solid rgba(157,176,255,.13); border-radius:14px; background:rgba(22,24,48,.78); }
-.st-key-workload_page .workload-day-card.selected { border-color:#8B7BFF; background:rgba(139,123,255,.13); }
-.st-key-workload_page .workload-day-total { font-size:.72rem; color:#E6E8FF; font-weight:800; margin-bottom:7px; }
-.st-key-workload_page .workload-bar-track { height:88px; width:25px; display:flex; flex-direction:column; justify-content:flex-end; background:rgba(255,255,255,.055); border-radius:8px; overflow:hidden; }
-.st-key-workload_page .workload-bar-done, .st-key-workload_page .workload-bar-open { width:100%; min-height:0; }
-.st-key-workload_page .workload-day-date { font-size:.72rem; color:#AFC0FF; margin-top:7px; }
-.st-key-workload_page .workload-month-weekday { text-align:center; color:#AFC0FF; font-size:.78rem; font-weight:800; padding:.35rem 0; }
-.st-key-workload_page .workload-month-cell { min-height:74px; padding:.4rem .3rem; margin-bottom:.25rem; border:1px solid rgba(157,176,255,.12); border-radius:11px; background:rgba(22,24,48,.72); display:flex; flex-direction:column; align-items:center; gap:.25rem; }
-.st-key-workload_page .workload-month-cell.selected { border-color:#8B7BFF; background:rgba(139,123,255,.18); }
-.st-key-workload_page .workload-month-cell.outside { opacity:.32; }
-.st-key-workload_page .workload-month-cell b { color:#E9E9FF; font-size:.86rem; }
-.st-key-workload_page .workload-month-cell span { color:#AFC0FF; font-size:.67rem; white-space:nowrap; }
-.st-key-workload_page .workload-month-dots { width:85%; display:flex; flex-direction:column; gap:2px; }
-.st-key-workload_page .workload-month-dots i { display:block; height:3px; border-radius:5px; }
-.st-key-workload_page .workload-month-cell + button { min-height:1.4rem; height:1.4rem; padding:0; margin-top:-.25rem; opacity:.0; }
-.st-key-workload_page .workload-selected-heading { margin:1rem 0 .5rem; color:#F0EEFF; font-weight:800; font-size:1rem; }
-.st-key-workload_page [class*="st-key-workload_task_"] {
-  display:flex; align-items:center; padding:.48rem .7rem !important; margin:.35rem 0 !important;
-  border:1px solid rgba(255,255,255,.08) !important; border-radius:14px !important; background:rgba(255,255,255,.04) !important;
-}
-.st-key-workload_page [class*="st-key-workload_task_"] [data-testid="stHorizontalBlock"] { gap:.55rem; }
-.st-key-workload_page [class*="st-key-workload_open_"] button {
-  background:transparent !important; border:0 !important; box-shadow:none !important; color:#ECEBFF !important;
-  text-align:left !important; padding:0 !important; font-weight:600 !important; min-height:1.8rem !important; justify-content:flex-start !important;
-}
-.st-key-workload_page [class*="st-key-workload_open_"] button:hover { color:#B9AEFF !important; transform:none !important; }
-.st-key-workload_page [class*="st-key-workload_task_completed_"] { border-left:3px solid #5CE1C6 !important; background:rgba(92,225,198,.055) !important; }
-.st-key-workload_page .workload-check-open { color:#8B7BFF; font-size:1.1rem; }
-.st-key-workload_page .workload-check-done { color:#5CE1C6; font-size:1.1rem; }
-.st-key-workload_page .workload-duration { color:#CFC8FF; font-weight:800; font-size:.82rem; white-space:nowrap; }
-.st-key-workload_page .workload-duration.done { color:#5CE1C6; }
-@media(max-width:700px) {
-  .st-key-workload_page .workload-month-cell { min-height:60px; }
-  .st-key-workload_page .workload-month-cell span { font-size:.58rem; }
-}
-/* Titres et informations des cartes projets en blanc */
-.pc-name, .pc-name *,
-.pc-desc, .pc-meta, .pc-meta *,
-[data-testid="stSidebar"] .ring-name,
-[data-testid="stSidebar"] .ring-sub,
-[data-testid="stSidebar"] .by {
-  color: #FFFFFF !important;
-}
-[data-testid="stSidebar"] .ring-name { font-weight: 750; }
-[data-testid="stSidebar"] .ring-sub,
-[data-testid="stSidebar"] .by { opacity: .88; }
 </style>
 """
 
+st.markdown(CSS, unsafe_allow_html=True)
 
-CSS += r"""
-<style>
-/* Navigation principale : boutons simples, sans radio/segmented-control ni coche. */
-.st-key-nav_projects_main button, .st-key-nav_workload_main button {
-  min-height:4.6rem; border-radius:19px; font-size:1.18rem; font-weight:850; letter-spacing:-.02em;
-  border:1px solid rgba(157,176,255,.2); transition:all .2s ease;
-}
-.st-key-nav_projects_main button:hover, .st-key-nav_workload_main button:hover {
-  transform:translateY(-2px); border-color:rgba(139,123,255,.65);
-}
-/* Dans Workload, les conteneurs utilisent exactement les classes task_late/soon/ok/done du board. */
-.st-key-workload_page [class*="st-key-task_"] {
-  border-radius:16px !important; padding:.6rem 1rem .6rem 1.1rem !important;
-  border:1px solid var(--line) !important; border-left:4px solid rgba(255,255,255,.14) !important;
-  margin-bottom:.15rem !important; background:linear-gradient(160deg,rgba(255,255,255,.065),rgba(255,255,255,.02)) !important;
-  backdrop-filter:blur(12px); transition:transform .25s ease,border-color .25s ease,box-shadow .25s ease;
-}
-.st-key-workload_page [class*="st-key-task_late_"] { border-left-color:#FF8FA3 !important; background:linear-gradient(90deg,rgba(255,107,129,.10),rgba(255,255,255,.02) 45%) !important; }
-.st-key-workload_page [class*="st-key-task_soon_"] { border-left-color:#FFC46B !important; }
-.st-key-workload_page [class*="st-key-task_ok_"] { border-left-color:#5CE1C6 !important; }
-.st-key-workload_page [class*="st-key-task_done_"] { border-left-color:rgba(255,255,255,.14) !important; opacity:.6; }
-.st-key-workload_page [class*="st-key-task_done_"]:hover { opacity:1; }
-.st-key-workload_page [class*="st-key-workload_open_"] button {
-  width:auto !important; min-height:unset !important; padding:0 !important; border:0 !important;
-  border-radius:0 !important; background:transparent !important; box-shadow:none !important;
-  color:var(--text) !important; font-size:1rem !important; font-weight:600 !important; text-align:left !important;
-  justify-content:flex-start !important;
-}
-.st-key-workload_page [class*="st-key-workload_open_"] button:hover { color:#B9AEFF !important; transform:none !important; }
-.st-key-workload_page [class*="st-key-task_done_"] [class*="st-key-workload_open_"] button { color:var(--muted) !important; text-decoration:line-through; }
-/* Fenêtres d'ajout/édition : hiérarchie et composition plus soignées, sans forcer les couleurs de police. */
-[data-testid="stDialog"] div[role="dialog"] { padding:1.25rem 1.4rem 1.4rem; }
-[data-testid="stDialog"] .dialog-intro { margin:1.1rem 0 .8rem; padding:.8rem 1rem; border-radius:13px; }
-[data-testid="stDialog"] [data-testid="stTextInput"],
-[data-testid="stDialog"] [data-testid="stTextArea"],
-[data-testid="stDialog"] [data-testid="stDateInput"],
-[data-testid="stDialog"] [data-testid="stSelectbox"],
-[data-testid="stDialog"] [data-testid="stMultiSelect"] { margin:.25rem 0 .7rem; }
-[data-testid="stDialog"] [data-testid="stTextArea"] textarea { min-height:6rem; }
-[data-testid="stDialog"] [data-testid="stFormSubmitButton"] button,
-[data-testid="stDialog"] .stButton button { min-height:2.9rem; border-radius:14px; }
-</style>
-
-"""
+TINTS = {"#8B7BFF": ("#E7E1FF", "#6C4DFF"), "#FF8FA3": ("#FFE0E6", "#E5486B"), "#5CE1C6": ("#D7F5E8", "#14A37A"),
+         "#FFC46B": ("#FFF1C4", "#D79500"), "#6BB6FF": ("#DCEBFF", "#2C7BE5"), "#C48BFF": ("#F0E3FF", "#9B4DE0")}
 
 
-
-# ---------- Données ----------
-URL = KEY = ANON = None
-_cfg_ok = True
-try:
-    URL = st.secrets["SUPABASE_URL"].rstrip("/")
-    KEY = st.secrets["SUPABASE_KEY"]
-    ANON = st.secrets.get("SUPABASE_ANON_KEY", KEY)
-except Exception:
-    _cfg_ok = False
-if not _cfg_ok:
-    st.error("Secrets Supabase introuvables (SUPABASE_URL, SUPABASE_KEY, SUPABASE_ANON_KEY, INVITE_CODE).")
-    st.stop()
-
-H = {"apikey": KEY, "Authorization": f"Bearer {KEY}"}
-COOKIE = "ag_rt"
-
-
-def rest(method, path, headers=None, **kw):
-    r = requests.request(
-        method, f"{URL}/rest/v1/{path}",
-        headers={**H, "Content-Type": "application/json", **(headers or {})}, timeout=10, **kw,
-    )
-    if not r.ok:
-        # Montre le vrai message d'erreur de Supabase (table manquante, RLS, etc.)
-        raise RuntimeError(f"Supabase {r.status_code} sur {path} : {r.text[:300]}")
-    return r.json() if r.content else None
-
-
-def me():
-    return st.session_state.user
-
-
-# ---------- Google Calendar OAuth & synchronisation ----------
-# Événement « journée entière » : minutes comptées depuis minuit le jour J.
-# 2340 = J-2 à 9 h, 900 = veille à 9 h (notification Google sur le téléphone).
-CALENDAR_IMPORTANT_REMINDERS = {"useDefault": False, "overrides": [
-    {"method": "popup", "minutes": 2340}, {"method": "popup", "minutes": 900}]}
-
-CALENDAR_SCOPES = [
-    "https://www.googleapis.com/auth/calendar.events",
-    "https://www.googleapis.com/auth/userinfo.email",
-    "openid",
-]
-
-
-def calendar_redirect_uri():
-    return st.secrets["GOOGLE_REDIRECT_URI"].strip()
-
-
-def calendar_client_config():
-    return {
-        "web": {
-            "client_id": st.secrets["GOOGLE_CLIENT_ID"],
-            "client_secret": st.secrets["GOOGLE_CLIENT_SECRET"],
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": "https://oauth2.googleapis.com/token",
-            "redirect_uris": [calendar_redirect_uri()],
-        }
-    }
-
-
-def calendar_flow(state):
-    # autogenerate_code_verifier=False : le Flow est recréé après la redirection,
-    # donc le code_verifier PKCE serait perdu et fetch_token échouerait.
-    flow = Flow.from_client_config(
-        calendar_client_config(), scopes=CALENDAR_SCOPES, state=state,
-        autogenerate_code_verifier=False,
-    )
-    flow.redirect_uri = calendar_redirect_uri()
-    return flow
-
-
-def calendar_fernet():
-    return Fernet(st.secrets["GOOGLE_TOKEN_ENCRYPTION_KEY"].encode())
-
-
-def calendar_connection():
-    rows = rest(
-        "GET", "google_calendar_connections",
-        params={
-            "user_id": f"eq.{me()['id']}",
-            "select": "user_id,refresh_token_encrypted,connected_email,scopes",
-            "limit": "1",
-        },
-    )
-    return rows[0] if rows else None
-
-
-def start_calendar_oauth():
-    state = py_secrets.token_urlsafe(32)
-    now = datetime.now(timezone.utc)
-    rest(
-        "POST", "google_calendar_oauth_states",
-        json={
-            "state": state,
-            "user_id": me()["id"],
-            "expires_at": (now + timedelta(minutes=10)).isoformat(),
-        },
-        headers={"Prefer": "return=minimal"},
-    )
-    flow = calendar_flow(state)
-    url, _ = flow.authorization_url(
-        access_type="offline", include_granted_scopes="true", prompt="consent"
-    )
-    st.session_state["calendar_auth_url"] = url
-
-
-def handle_calendar_callback():
-    params = st.query_params
-    error = params.get("error")
-    if error:
-        st.session_state["calendar_notice_err"] = "Autorisation Google Calendar refusée ou annulée."
-        st.session_state.pop("calendar_auth_url", None)
-        st.query_params.clear()
-        st.rerun()
-
-    code = params.get("code")
-    state = params.get("state")
-    if not code or not state:
-        return
-
-    valid_states = rest(
-        "GET", "google_calendar_oauth_states",
-        params={
-            "state": f"eq.{state}",
-            "user_id": f"eq.{me()['id']}",
-            "expires_at": "gt." + datetime.now(timezone.utc).isoformat(),
-            "select": "state",
-            "limit": "1",
-        },
-    )
-    if not valid_states:
-        st.session_state["calendar_notice_err"] = "Demande Google expirée ou invalide. Recommence la connexion."
-        st.session_state.pop("calendar_auth_url", None)
-        st.query_params.clear()
-        st.rerun()
-
-    flow = calendar_flow(state)
-    flow.fetch_token(code=code)
-    creds = flow.credentials
-
-    oauth_service = build("oauth2", "v2", credentials=creds, cache_discovery=False)
-    google_email = oauth_service.userinfo().get().execute()["email"]
-
-    old = calendar_connection()
-    refresh_token = creds.refresh_token
-    if not refresh_token and old:
-        refresh_token = calendar_fernet().decrypt(
-            old["refresh_token_encrypted"].encode()
-        ).decode()
-    if not refresh_token:
-        raise RuntimeError(
-            "Google n'a pas renvoyé de jeton de renouvellement. Révoque l'accès existant à Anti Gooner dans ton compte Google, puis recommence."
-        )
-
-    encrypted = calendar_fernet().encrypt(refresh_token.encode()).decode()
-    saved_rows = rest(
-        "POST", "google_calendar_connections",
-        params={"on_conflict": "user_id"},
-        json={
-            "user_id": me()["id"],
-            "refresh_token_encrypted": encrypted,
-            "connected_email": google_email,
-            "scopes": CALENDAR_SCOPES,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        },
-        headers={"Prefer": "resolution=merge-duplicates,return=representation"},
-    )
-    if not saved_rows:
-        raise RuntimeError("Écriture dans google_calendar_connections sans effet (RLS ou contrainte ?)")
-    rest("DELETE", "google_calendar_oauth_states", params={"state": f"eq.{state}"})
-    st.session_state.pop("calendar_auth_url", None)
-    st.session_state["calendar_notice"] = f"Google Calendar connecté : {google_email}"
-    st.query_params.clear()
-    st.rerun()
-
-
-def calendar_credentials():
-    connection = calendar_connection()
-    if not connection:
-        return None
-    refresh_token = calendar_fernet().decrypt(
-        connection["refresh_token_encrypted"].encode()
-    ).decode()
-    creds = Credentials(
-        token=None,
-        refresh_token=refresh_token,
-        token_uri="https://oauth2.googleapis.com/token",
-        client_id=st.secrets["GOOGLE_CLIENT_ID"],
-        client_secret=st.secrets["GOOGLE_CLIENT_SECRET"],
-        scopes=CALENDAR_SCOPES,
-    )
-    creds.refresh(Request())
-    return creds
-
-
-def calendar_service():
-    creds = calendar_credentials()
-    if creds is None:
-        return None
-    return build("calendar", "v3", credentials=creds, cache_discovery=False)
-
-
-def gcal_exec(request, tries=5):
-    """Exécute une requête Google avec nouvel essai en cas de limite de débit."""
-    for i in range(tries):
-        try:
-            return request.execute()
-        except HttpError as exc:
-            msg = str(exc).lower()
-            if i < tries - 1 and (exc.resp.status in (429, 500, 503) or "ratelimit" in msg):
-                time.sleep(0.5 * 2 ** i)
-                continue
-            raise
-
-
-def sync_google_calendar():
-    """Synchronise les deadlines et renvoie un bilan détaillé."""
-    service = calendar_service()
-    if service is None:
-        raise RuntimeError("Connecte d'abord ton compte Google Calendar.")
-
-    user_id = str(me()["id"])
-    desired = {}
-    invalid = []
-    for project in st.session_state.projects:
-        try:
-            desired[("project", str(project["id"]))] = {
-                "summary": f"Anti Gooner - Deadline : {project['name']}",
-                "description": project.get("desc", ""),
-                "due": str(project["due"]),
-            }
-        except (KeyError, TypeError) as exc:
-            invalid.append(f"Projet sans deadline ou identifiant valide : {exc}")
-        for task in project.get("tasks", []):
-            if task.get("done"):
-                continue
-            try:
-                starred = is_important(task, user_id)
-                desired[("task", str(task["id"]))] = {
-                    "summary": ("⭐ " if starred else "") + f"{project['name']} : {task['title']}",
-                    "description": f"Responsable : {task.get('owner', 'Tout le monde')}",
-                    "due": str(task["due"]),
-                    "important": starred,
-                }
-            except (KeyError, TypeError) as exc:
-                invalid.append(f"Tâche sans deadline ou identifiant valide : {exc}")
-
-    rows = rest(
-        "GET", "google_calendar_events",
-        params={"user_id": f"eq.{user_id}", "select": "entity_type,entity_id,google_event_id"},
-    )
-    existing = {
-        (str(r["entity_type"]), str(r["entity_id"])): r["google_event_id"]
-        for r in rows
-    }
-    created = updated = removed = failed = 0
-    errors = list(invalid)
-
-    for key, item in desired.items():
-        entity_type, entity_id = key
-        event_id = existing.get(key)
-        try:
-            due = date.fromisoformat(item["due"][:10])
-            event = {
-                "summary": item["summary"],
-                "description": item["description"],
-                "start": {"date": due.isoformat()},
-                "end": {"date": (due + timedelta(days=1)).isoformat()},
-                "reminders": CALENDAR_IMPORTANT_REMINDERS if item.get("important") else {"useDefault": True},
-            }
-            stable_id = hashlib.sha256(
-                f"{user_id}:{entity_type}:{entity_id}".encode()
-            ).hexdigest()
-
-            if event_id:
-                try:
-                    gcal_exec(service.events().update(
-                        calendarId="primary", eventId=event_id, body=event
-                    ))
-                    updated += 1
-                except HttpError as exc:
-                    if exc.resp.status != 404:
-                        raise
-                    event_id = None
-
-            if not event_id:
-                event["id"] = stable_id
-                try:
-                    gcal_exec(service.events().insert(calendarId="primary", body=event))
-                    created += 1
-                except HttpError as exc:
-                    if exc.resp.status != 409:
-                        raise
-                    # L'événement existe déjà (ou a été supprimé : on le ressuscite).
-                    event["status"] = "confirmed"
-                    gcal_exec(service.events().update(
-                        calendarId="primary", eventId=stable_id, body=event
-                    ))
-                    updated += 1
-                event_id = stable_id
-
-            rest(
-                "POST", "google_calendar_events",
-                params={"on_conflict": "user_id,entity_type,entity_id"},
-                json={
-                    "user_id": user_id, "entity_type": entity_type,
-                    "entity_id": entity_id, "google_event_id": event_id,
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                },
-                headers={"Prefer": "resolution=merge-duplicates,return=minimal"},
-            )
-        except Exception as exc:
-            failed += 1
-            errors.append(f"{item.get('summary', entity_id)} : {type(exc).__name__}: {exc}")
-        time.sleep(0.1)
-
-    # Supprime les événements devenus inutiles seulement si leur suppression réussit.
-    for key, event_id in existing.items():
-        if key in desired:
-            continue
-        try:
-            try:
-                gcal_exec(service.events().delete(calendarId="primary", eventId=event_id))
-            except HttpError as exc:
-                if exc.resp.status not in (404, 410):
-                    raise
-            rest("DELETE", "google_calendar_events", params={
-                "user_id": f"eq.{user_id}",
-                "entity_type": f"eq.{key[0]}",
-                "entity_id": f"eq.{key[1]}",
-            })
-            removed += 1
-        except Exception as exc:
-            failed += 1
-            errors.append(f"Suppression {key[0]} {key[1]} : {type(exc).__name__}: {exc}")
-        time.sleep(0.1)
-
-    return {
-        "created": created, "updated": updated, "removed": removed,
-        "failed": failed, "target": len(desired), "errors": errors,
-    }
-
-
-def show_sync_report(report, prefix="Google Calendar"):
-    st.success(
-        f"{prefix} : {report['created']} créés, "
-        f"{report['updated']} mis à jour, {report['removed']} supprimés."
-    )
-    if report["failed"]:
-        st.warning(f"{report['failed']} élément(s) en échec sur {report['target']} à synchroniser.")
-    for message in report["errors"][:8]:
-        st.caption(message)
-
-
-def run_sync(prefix="Google Calendar"):
-    with st.spinner("Synchronisation en cours…"):
-        try:
-            show_sync_report(sync_google_calendar(), prefix)
-        except Exception as exc:
-            st.error(f"Synchronisation impossible : {type(exc).__name__}: {exc}")
-
-
-def profiles():
-    return rest("GET", "profiles", params={"select": "id,name", "order": "name"})
-
-
-def load():
-    """Projets dont l'utilisateur connecté est membre."""
-    rows = rest("GET", "projects", params={"member_ids": f"cs.{{{me()['id']}}}", "select": "data"})
-    return [r["data"] for r in rows]
-
-
-def save():
-    try:
-        rows = [
-            {"id": p["id"], "member_ids": p["member_ids"], "data": p}
-            for p in st.session_state.projects
-        ]
-        if rows:
-            rest("POST", "projects", json=rows, headers={"Prefer": "resolution=merge-duplicates,return=minimal"})
-    except Exception:
-        st.toast(tr("Sauvegarde impossible, réessaie dans un instant."), icon="⚠️")
-
-
-# ---------- Comptes (connexion Google via st.login) ----------
-def register(name, code, email):
-    invite = str(st.secrets.get("INVITE_CODE", ""))
-    if not invite:
-        return tr("Inscriptions fermées (INVITE_CODE absent des Secrets).")
-    if not hmac.compare_digest(code.strip().encode(), invite.encode()):
-        return tr("Code d'invitation incorrect.")
-    name = name.strip()
-    if len(name) < 2:
-        return tr("Prénom trop court.")
-    if any(x["name"].lower() == name.lower() for x in profiles()):
-        return tr("Ce nom est déjà pris.")
-    try:
-        rest(
-            "POST", "profiles",
-            json={"id": str(uuid.uuid4()), "name": name, "email": email},
-            headers={"Prefer": "return=minimal"},
-        )
-    except Exception:
-        return tr("Création impossible, réessaie dans un instant.")
-    return None
+def tint(color):
+    return TINTS.get(color, ("#E7E1FF", color))
 
 
 def hero(text):
-    st.markdown(
-        '<div class="banner"><h1>anti gooner</h1><p>' + text + "</p></div>", unsafe_allow_html=True
-    )
+    _, mid, _ = st.columns([1, 2, 1])
+    with mid:
+        c.language_switch()
+    st.markdown(f'<div class="login"><div class="hello">anti <span>gooner</span></div><p>{text}</p></div>', unsafe_allow_html=True)
 
 
-def auth_gate():
-    if "user" in st.session_state:
-        return
-    if not getattr(st.user, "is_logged_in", False):
-        hero(tr("Connecte-toi pour retrouver tes projets."))
-        st.button(tr("Continuer avec Google"), type="primary", on_click=st.login, key="google_login")
-        st.stop()
-
-    email = (getattr(st.user, "email", "") or "").strip().lower()
-    if not email or getattr(st.user, "email_verified", True) is False:
-        hero(tr("Ton compte Google n'a pas d'email vérifié."))
-        st.button(tr("Se déconnecter"), on_click=st.logout, key="logout_err")
-        st.stop()
-
-    try:
-        rows = rest("GET", "profiles", params={"email": f"eq.{email}", "select": "id,name"})
-    except Exception:
-        st.error(tr("Impossible de joindre la base de données (projet Supabase en pause, ou URL / clé incorrectes). Tes données ne sont pas perdues."))
-        st.stop()
-    if rows:
-        st.session_state.user = {"id": rows[0]["id"], "name": rows[0]["name"]}
-        return
-
-    # Première connexion : prénom + code d'invitation
-    hero(tr("Première connexion avec {email}. Choisis ton prénom et entre le code d'invitation.").format(email=email))
-    with st.form("onboarding", border=False):
-        name = st.text_input(tr("Ton prénom (visible par tes amis)"), key="ob_name", autocomplete="given-name")
-        code = st.text_input(tr("Code d'invitation"), type="password", key="ob_code", autocomplete="off")
-        go = st.form_submit_button(tr("Créer mon compte"), type="primary")
-    st.button(tr("Se déconnecter"), on_click=st.logout, key="logout_ob")
-    if go:
-        err = register(name, code, email)
-        if err:
-            st.error(err)
-        else:
-            st.rerun()
-    st.stop()
+c.auth_gate(hero)
+cal_row, cal_err = c.bootstrap()
+st.session_state.setdefault("page", "home")
 
 
-def uid():
-    return uuid.uuid4().hex[:8]
-
-
-def esc(s):
-    return html.escape(s or "")
-
-
-def parse(d):
-    return date.fromisoformat(d)
-
-
-def get_project(pid):
-    return next((p for p in st.session_state.projects if p["id"] == pid), None)
-
-
-def progress(p):
-    total = len(p["tasks"])
-    done = sum(1 for t in p["tasks"] if t["done"])
-    return done, total
-
-
-def due_badge(d, done=False):
-    if done:
-        return f'<span class="badge done">{tr("terminé")}</span>'
-    n = (parse(d) - date.today()).days
-    if n < 0:
-        txt, cls = tr("en retard de {n} j").format(n=-n), "late"
-    elif n == 0:
-        txt, cls = tr("aujourd'hui"), "soon"
-    elif n == 1:
-        txt, cls = tr("demain"), "soon"
-    else:
-        txt, cls = tr("dans {n} j").format(n=n), ("soon" if n <= 3 else "ok")
-    return f'<span class="badge {cls}">{txt}</span>'
-
-
-# ---------- Callbacks ----------
-def set_open(pid):
-    st.session_state.open = pid
-
-
-def toggle(pid, tid):
-    who = me()["name"]
-    for t in get_project(pid)["tasks"]:
-        if t["id"] == tid:
-            t["done"] = st.session_state[f"chk_{tid}"]
-            t["by"] = who if t["done"] else ""
-    save()
-
-
-def delete_task(pid, tid):
-    p = get_project(pid)
-    p["tasks"] = [t for t in p["tasks"] if t["id"] != tid]
-    save()
-
-
-def delete_project(pid):
-    try:
-        rest("DELETE", "projects", params={"id": f"eq.{pid}"})
-    except Exception:
-        st.toast(tr("Suppression impossible, réessaie dans un instant."), icon="⚠️")
-        return
-    st.session_state.projects = [p for p in st.session_state.projects if p["id"] != pid]
+def go(page):
+    st.session_state.page = page
     st.session_state.open = None
 
 
-def add_member(pid):
-    name = st.session_state.get("new_member")
-    p = get_project(pid)
-    match = next((x for x in profiles() if x["name"] == name), None)
-    if match and match["id"] not in p["member_ids"]:
-        p["members"].append(match["name"])
-        p["member_ids"].append(match["id"])
-        save()
-    st.session_state.new_member = None
-
-
-def set_project_due(pid):
-    get_project(pid)["due"] = st.session_state[f"pdue_{pid}"].isoformat()
-    save()
-
-
-def set_task_due(pid, tid):
-    for t in get_project(pid)["tasks"]:
-        if t["id"] == tid:
-            t["due"] = st.session_state[f"due_{tid}"].isoformat()
-    save()
-
-
-# ---------- Tâches importantes (choix personnel de chaque utilisateur) ----------
-IMPORTANT_HELP = "Tu recevras un email de rappel avant la deadline, et une notification si Google Calendar est connecté."
-REMIND_DAYS = 2
-
-
-def is_important(t, user_id=None):
-    uid_ = str(user_id if user_id is not None else me()["id"])
-    return uid_ in [str(x) for x in t.get("important_for", [])]
-
-
-def set_important(t, value):
-    uid_ = str(me()["id"])
-    t["important_for"] = [str(x) for x in t.get("important_for", []) if str(x) != uid_] + ([uid_] if value else [])
-
-
-def toggle_important(pid, tid):
-    for t in get_project(pid)["tasks"]:
-        if t["id"] == tid:
-            set_important(t, not is_important(t))
-    save()
-
-
-def important_banner():
-    today = date.today()
-    items = sorted(((p, t) for p in st.session_state.projects for t in p["tasks"]
-                    if not t["done"] and is_important(t) and (parse(t["due"]) - today).days <= REMIND_DAYS),
-                   key=lambda x: x[1]["due"])
-    if not items:
-        return
-    def when(d):
-        n = (parse(d) - today).days
-        return tr("en retard de {n} j").format(n=-n) if n < 0 else tr("aujourd'hui") if n == 0 else tr("demain") if n == 1 else tr("dans {n} j").format(n=n)
-    text = ", ".join(f"{t['title']} ({when(t['due'])})" for _, t in items[:4]) + (" …" if len(items) > 4 else "")
-    st.warning(tr("{n} tâche(s) importante(s) à surveiller : {items}").format(n=len(items), items=text), icon="⭐")
-
-
-# ---------- Estimation et charge de travail ----------
-DURATION_OPTIONS = list(range(15, 481, 15))
-
-
-def format_duration(minutes):
-    minutes = int(minutes or 60)
-    hours, mins = divmod(minutes, 60)
-    if hours and mins:
-        return f"{hours} h {mins:02d}"
-    if hours:
-        return f"{hours} h"
-    return f"{mins} min"
-
-
-def duration_picker(label, value=60, key="duration"):
-    """Sélecteur visuel en pas de 15 minutes, de 15 min à 8 h."""
-    value = max(15, min(480, int(value or 60)))
-    st.markdown(
-        '<div style="padding:.75rem 1rem;border:1px solid rgba(139,123,255,.28);'
-        'background:linear-gradient(120deg,rgba(139,123,255,.12),rgba(255,255,255,.025));'
-        'border-radius:16px;margin:.25rem 0 .65rem">'
-        '<div style="font-size:.78rem;color:#AFA8E8;font-weight:700;letter-spacing:.06em;'
-        'text-transform:uppercase">⏱ ' + esc(tr(label)) + '</div></div>',
-        unsafe_allow_html=True,
-    )
-    return st.select_slider(
-        tr(label), options=DURATION_OPTIONS, value=value, key=key,
-        format_func=format_duration, label_visibility="collapsed",
-    )
-
-
-def workload_data():
-    rows = []
-    for project in st.session_state.projects:
-        for task in project.get("tasks", []):
-            try:
-                due = parse(task["due"])
-            except (KeyError, TypeError, ValueError):
-                continue
-            rows.append({
-                "date": due,
-                "minutes": max(0, int(task.get("duration_minutes", 60) or 60)),
-                "title": task.get("title", ""),
-                "project": project.get("name", ""),
-                "project_id": project.get("id"),
-                "task_id": task.get("id"),
-                "owner": task.get("owner", ""),
-                "done": bool(task.get("done")),
-            })
-    return rows
-
-
-def _workload_chart(title, subtitle, labels, values, task_details, key):
-    """Graphique intégré à la DA ; survol informatif, sans barre d'outils ni zoom."""
-    with st.container(key=key):
-        st.markdown("### " + tr(title))
-        st.caption(tr(subtitle))
-        if not any(values):
-            st.info(tr("Aucune tâche planifiée sur cette période."))
-            return
-        hover = ["<br>".join(detail) if detail else "Aucune tâche" for detail in task_details]
-        fig = go.Figure(go.Bar(
-            x=values, y=labels, orientation="h", customdata=hover,
-            marker=dict(color="#8B7BFF", line=dict(color="rgba(196,185,255,.28)", width=1),
-                        cornerradius=7),
-            hovertemplate="<b>%{y}</b><br>Charge estimée : <b>%{x:.2f} h</b><br><br>%{customdata}<extra></extra>",
-        ))
-        fig.update_layout(
-            height=max(250, 34 * len(labels) + 70),
-            margin=dict(l=8, r=18, t=8, b=8),
-            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-            font=dict(family="Manrope, sans-serif", color="#E8E6FF", size=12),
-            showlegend=False,
-            hoverlabel=dict(bgcolor="#22213D", bordercolor="#8B7BFF", font=dict(color="#FFFFFF", size=12)),
-            xaxis=dict(title="Heures", showgrid=True, gridcolor="rgba(210,205,255,.09)",
-                       zeroline=False, tickfont=dict(color="#BDB9DC"), rangemode="tozero", fixedrange=True),
-            yaxis=dict(showgrid=False, tickfont=dict(color="#E2DFFF", size=11), autorange="reversed", fixedrange=True),
-            bargap=.38,
-        )
-        st.plotly_chart(
-            fig, use_container_width=True, theme=None, key=f"{key}_plot",
-            config={"displayModeBar": False, "displaylogo": False,
-                    "scrollZoom": False, "staticPlot": False, "responsive": True},
-        )
-
-
-def open_workload_project(pid):
+def open_project(pid):
+    st.session_state.page = "projects"
     st.session_state.open = pid
-    st.session_state.main_navigation = tr("Projets")
 
 
-def _workload_task_row(item, section_key="list"):
-    """Réutilise le rendu commun des tâches, comme dans la vue Projet."""
-    project = get_project(item["project_id"])
-    if not project:
-        return
-    task = next((t for t in project.get("tasks", []) if str(t.get("id")) == str(item["task_id"])), None)
-    if task:
-        render_task_card(project, task, key_suffix=f"workload_{section_key}")
+def pill(d, done=False):
+    cls, txt = c.due_info(d, done)
+    icon = {"late": "⏰", "soon": "⚡", "ok": "📅", "done": "✓"}[cls]
+    return f'<span class="pill {cls}">{icon} {esc(txt)}</span>'
 
 
-def workload_view():
-    with st.container(key="workload_page"):
-        st.markdown('<div class="side-title">📊 ' + tr("Charge de travail") + '</div>', unsafe_allow_html=True)
-        st.caption(tr("Charge basée sur les deadlines") + " · Les tâches terminées sont affichées séparément.")
-        all_rows = workload_data()
-        rows = [x for x in all_rows if not x["done"]]
-        completed = sorted((x for x in all_rows if x["done"]), key=lambda x: (x["date"], x["project"]))
-        today = date.today()
-        total_minutes = sum(x["minutes"] for x in rows)
-        today_minutes = sum(x["minutes"] for x in rows if x["date"] == today)
-        monday = today - timedelta(days=today.weekday())
-        week_minutes = sum(x["minutes"] for x in rows if monday <= x["date"] < monday + timedelta(days=7))
-        k1, k2, k3 = st.columns(3)
-        k1.metric(tr("Heures restantes"), format_duration(total_minutes))
-        k2.metric(tr("Aujourd'hui"), format_duration(today_minutes))
-        k3.metric(tr("Cette semaine"), format_duration(week_minutes))
-
-        if "workload_period" not in st.session_state:
-            st.session_state.workload_period = "Semaine"
-        period_a, period_b = st.columns([1, 1], gap="small")
-        with period_a:
-            if st.button("Semaine", key="workload_view_week", use_container_width=True,
-                          type="primary" if st.session_state.workload_period == "Semaine" else "secondary"):
-                st.session_state.workload_period = "Semaine"
-                st.rerun()
-        with period_b:
-            if st.button("Mois", key="workload_view_month", use_container_width=True,
-                          type="primary" if st.session_state.workload_period == "Mois" else "secondary"):
-                st.session_state.workload_period = "Mois"
-                st.rerun()
-        view = st.session_state.workload_period
-        st.markdown("#### Répartition du temps")
-
-        if view == "Semaine":
-            if "workload_week_start" not in st.session_state:
-                st.session_state.workload_week_start = monday
-            period_start = st.session_state.workload_week_start
-            period_end = period_start + timedelta(days=6)
-            left, center, right = st.columns([1, 5, 1], vertical_alignment="center")
-            with left:
-                if st.button("‹", key="workload_prev_week", help="Semaine précédente", use_container_width=True):
-                    st.session_state.workload_week_start = period_start - timedelta(days=7)
-                    st.rerun()
-            with center:
-                st.markdown(f'<div class="workload-period-label">{period_start:%d %b} – {period_end:%d %b %Y}</div>', unsafe_allow_html=True)
-            with right:
-                if st.button("›", key="workload_next_week", help="Semaine suivante", use_container_width=True):
-                    st.session_state.workload_week_start = period_start + timedelta(days=7)
-                    st.rerun()
-            period_rows = [x for x in all_rows if period_start <= x["date"] <= period_end]
-            day_dates = [period_start + timedelta(days=i) for i in range(7)]
-            selected_key = "workload_selected_day"
-            day_names = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
-        else:
-            if "workload_month_start" not in st.session_state:
-                st.session_state.workload_month_start = today.replace(day=1)
-            period_start = st.session_state.workload_month_start.replace(day=1)
-            next_month = (period_start.replace(day=28) + timedelta(days=4)).replace(day=1)
-            period_end = next_month - timedelta(days=1)
-            left, center, right = st.columns([1, 5, 1], vertical_alignment="center")
-            with left:
-                if st.button("‹", key="workload_prev_month", help="Mois précédent", use_container_width=True):
-                    st.session_state.workload_month_start = (period_start - timedelta(days=1)).replace(day=1)
-                    st.rerun()
-            with center:
-                st.markdown(f'<div class="workload-period-label">{period_start:%B %Y}</div>', unsafe_allow_html=True)
-            with right:
-                if st.button("›", key="workload_next_month", help="Mois suivant", use_container_width=True):
-                    st.session_state.workload_month_start = next_month
-                    st.rerun()
-            period_rows = [x for x in all_rows if period_start <= x["date"] <= period_end]
-            first_cell = period_start - timedelta(days=period_start.weekday())
-            day_dates = [first_cell + timedelta(days=i) for i in range(((period_end-first_cell).days // 7 + 1) * 7)]
-            selected_key = "workload_selected_month_day"
-            day_names = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
-
-        open_period = [x for x in period_rows if not x["done"]]
-        done_period = [x for x in period_rows if x["done"]]
-        open_minutes = sum(x["minutes"] for x in open_period)
-        done_minutes = sum(x["minutes"] for x in done_period)
-        st.markdown(f'<div class="workload-legend"><span>● Ouvertes : <b>{format_duration(open_minutes)}</b></span><span>● Terminées : <b>{format_duration(done_minutes)}</b></span></div>', unsafe_allow_html=True)
-        selected_day = st.session_state.get(selected_key, today)
-        if selected_day not in day_dates:
-            selected_day = period_start if view == "Semaine" else min(max(today, period_start), period_end)
-            st.session_state[selected_key] = selected_day
-
-        if view == "Semaine":
-            cols = st.columns(7, gap="small")
-            max_minutes = max([sum(x["minutes"] for x in period_rows if x["date"] == d) for d in day_dates] + [60])
-            for i, (col, day) in enumerate(zip(cols, day_dates)):
-                with col:
-                    opened = sum(x["minutes"] for x in open_period if x["date"] == day)
-                    finished = sum(x["minutes"] for x in done_period if x["date"] == day)
-                    total = opened + finished
-                    st.markdown(f'<div class="workload-day-card {"selected" if day == selected_day else ""}"><div class="workload-day-total">{format_duration(total) if total else "—"}</div><div class="workload-bar-track"><div class="workload-bar-done" style="height:{finished/max_minutes*100:.1f}%"></div><div class="workload-bar-open" style="height:{opened/max_minutes*100:.1f}%"></div></div><div class="workload-day-date">{day:%d/%m}</div></div>', unsafe_allow_html=True)
-                    if st.button(day_names[i], key=f"workload_day_{day.isoformat()}", use_container_width=True,
-                                 type="primary" if day == selected_day else "secondary"):
-                        st.session_state[selected_key] = day
-                        st.rerun()
-        else:
-            head = st.columns(7, gap="small")
-            for c, name in zip(head, day_names):
-                c.markdown(f'<div class="workload-month-weekday">{name}</div>', unsafe_allow_html=True)
-            for week_index in range(0, len(day_dates), 7):
-                cols = st.columns(7, gap="small")
-                for col, day in zip(cols, day_dates[week_index:week_index+7]):
-                    with col:
-                        inside = day.month == period_start.month
-                        opened = sum(x["minutes"] for x in open_period if x["date"] == day)
-                        finished = sum(x["minutes"] for x in done_period if x["date"] == day)
-                        total = opened + finished
-                        label = f'<div class="workload-month-cell {"selected" if day == selected_day else ""} {"outside" if not inside else ""}"><b>{day.day}</b><span>{format_duration(total) if total else "·"}</span><div class="workload-month-dots"><i style="width:{min(100,opened/480*100):.0f}%;background:#8B7BFF"></i><i style="width:{min(100,finished/480*100):.0f}%;background:#5CE1C6"></i></div></div>'
-                        st.markdown(label, unsafe_allow_html=True)
-                        if st.button(" ", key=f"workload_month_day_{day.isoformat()}",
-                                     help=f"{day:%d/%m/%Y} · {format_duration(total)}", use_container_width=True):
-                            st.session_state[selected_key] = day
-                            st.rerun()
-
-        selected_rows = sorted([x for x in all_rows if x["date"] == selected_day],
-                               key=lambda x: (x["done"], x["project"], x["title"]))
-        st.markdown(f'<div class="workload-selected-heading">{selected_day:%A %d %B} · {len(selected_rows)} tâche(s)</div>', unsafe_allow_html=True)
-        if selected_rows:
-            for item in selected_rows:
-                _workload_task_row(item, f"{view.lower()}_selected")
-        else:
-            st.caption("Aucune tâche avec une échéance ce jour-là.")
-
-        st.markdown("### Tâches ouvertes")
-        upcoming = sorted((x for x in rows if x["date"] >= today), key=lambda x: (x["date"], x["project"]))
-        if upcoming:
-            for item in upcoming[:30]:
-                _workload_task_row(item, "upcoming")
-        else:
-            st.caption("Aucune tâche ouverte à venir.")
-        st.markdown("### Tâches terminées")
-        st.caption("Les tâches terminées restent accessibles, avec une présentation atténuée et un repère vert.")
-        if completed:
-            for item in completed[:30]:
-                _workload_task_row(item, "completed")
-        else:
-            st.caption("Aucune tâche terminée pour le moment.")
+def avatar(name):
+    col = c.owner_color(name)
+    return f'<span class="av" style="background:{col}">{esc(c.owner_initial(name))}</span>'
 
 
-# ---------- Dialogues ----------
-@st.dialog(tr("Nouveau projet"))
-def new_project():
-    st.caption("Organise ton travail, fixe une échéance et invite ton équipe.")
-    st.markdown('<div class="dialog-intro">01 <span>·</span> ' + tr("Informations du projet") + '</div>', unsafe_allow_html=True)
-    name = st.text_input(tr("Nom du projet"), placeholder=tr("Ex. Étude de cas marketing"))
-    desc = st.text_area(tr("Description (facultatif)"), height=90,
-                        placeholder="Quel est l'objectif de ce projet ?")
-    due = st.date_input(
-        tr("Deadline du projet"), value=date.today() + timedelta(days=14), format="DD/MM/YYYY"
-    )
-    st.markdown('<div class="dialog-intro">02 <span>·</span> ' + tr("Qui est dans l'équipe ?") + '</div>', unsafe_allow_html=True)
-    others = [x for x in profiles() if x["id"] != me()["id"]]
-    chosen = st.multiselect(
-        tr("Qui est dans l'équipe ?"), [x["name"] for x in others],
-        placeholder=tr("Ajoute des amis inscrits")
-    )
-    st.caption(f"👥 {1 + len(chosen)} membre(s) dans l'équipe")
-    if st.button(tr("Créer le projet"), type="primary", use_container_width=True):
-        if not name.strip():
-            st.error(tr("Donne un nom au projet."))
-            return
-        st.session_state.projects.append(
-            {
-                "id": uid(),
-                "name": name.strip(),
-                "desc": desc.strip(),
-                "due": due.isoformat(),
-                "color": COLORS[len(st.session_state.projects) % len(COLORS)],
-                "members": [me()["name"]] + chosen,
-                "member_ids": [me()["id"]] + [x["id"] for x in others if x["name"] in chosen],
-                "owner_id": me()["id"],
-                "tasks": [],
-            }
-        )
-        save()
-        st.toast("Projet créé avec succès ✨")
-        st.rerun()
+def ring(p, size=56, stroke=6):
+    pct = c.pct(p)
+    light, strong = tint(p["color"])
+    r = 18 - stroke / 2 * 36 / size
+    circ = 2 * 3.14159 * r
+    return (f'<svg width="{size}" height="{size}" viewBox="0 0 36 36">'
+            f'<circle cx="18" cy="18" r="{r:.2f}" fill="none" stroke="{light}" stroke-width="{stroke * 36 / size:.2f}"/>'
+            + (f'<circle cx="18" cy="18" r="{r:.2f}" fill="none" stroke="{strong}" stroke-width="{stroke * 36 / size:.2f}" stroke-linecap="round" '
+               f'stroke-dasharray="{circ * pct / 100:.2f} {circ:.2f}" transform="rotate(-90 18 18)"/>' if pct else "")
+            + f'<text x="18" y="21" text-anchor="middle" font-size="9" font-weight="800" fill="#20223A" font-family="Outfit, sans-serif">{pct}%</text></svg>')
 
 
-@st.dialog(tr("Nouvelle tâche"))
-def new_task(pid):
-    p = get_project(pid)
-    st.markdown("Ajoute les informations essentielles, puis estime le temps nécessaire.")
-    st.markdown('<div class="dialog-intro">01 <span>·</span> Détails de la tâche</div>', unsafe_allow_html=True)
-    title = st.text_input(tr("Tâche"), placeholder=tr("Ex. Rédiger l'introduction"))
-    c1, c2 = st.columns(2)
-    due = c1.date_input("Deadline", value=date.today() + timedelta(days=3), format="DD/MM/YYYY")
-    owner = c2.selectbox(tr("Responsable"), ["Tout le monde"] + p["members"], format_func=tr)
-    duration = duration_picker("Durée estimée", 60, key=f"new_duration_{pid}")
-    st.caption(f"Charge estimée : **{format_duration(duration)}**")
-    important = st.toggle("⭐ " + tr("Importante pour moi (rappels)"), key=f"new_important_{pid}", help=tr(IMPORTANT_HELP))
-    if st.button(tr("Ajouter la tâche"), type="primary", use_container_width=True):
-        if not title.strip():
-            st.error(tr("Donne un nom à la tâche."))
-            return
-        p["tasks"].append({
-            "id": uid(), "title": title.strip(), "due": due.isoformat(),
-            "owner": owner, "duration_minutes": int(duration), "done": False, "by": "",
-            "important_for": [str(me()["id"])] if important else [],
-        })
-        save()
-        st.rerun()
+# ---------- Barre supérieure ----------
+def topbar():
+    with st.container(key="topbar"):
+        cols = st.columns([1.6, 1, 1, 1, 1, 1.05, 0.4], vertical_alignment="center")
+        cols[0].markdown('<div class="logo">anti <span>gooner</span></div>', unsafe_allow_html=True)
+        for col, (pid, label) in zip(cols[1:5], [("home", "🏠 " + tr("Accueil")), ("projects", "📁 " + tr("Projets")),
+                                                  ("planning", "📅 " + tr("Planning")), ("account", "⚙️ " + tr("Compte"))]):
+            with col, st.container(key=f"tab_{pid}"):
+                st.button(label, on_click=go, args=(pid,), use_container_width=True,
+                          type="primary" if st.session_state.page == pid else "secondary")
+        with cols[5]:
+            c.language_switch()
+        cols[6].markdown(f'<div class="avatar-me">{esc(c.me()["name"][:1].upper())}</div>', unsafe_allow_html=True)
 
 
-@st.dialog(tr("Modifier le projet"))
-def edit_project(pid):
-    p = get_project(pid)
-    if not p:
-        return
-    st.caption("Modifie les informations du projet et les personnes qui y participent.")
-    st.markdown('<div class="dialog-intro">01 <span>·</span> Informations du projet</div>', unsafe_allow_html=True)
-    with st.form(f"edit_project_dialog_{pid}", border=False):
-        new_name = st.text_input(tr("Nom du projet"), value=p["name"])
-        new_desc = st.text_area(tr("Description (facultatif)"), value=p.get("desc", ""), height=100)
-        new_due = st.date_input(tr("Deadline du projet"), value=parse(p["due"]), format="DD/MM/YYYY")
-        submitted = st.form_submit_button(tr("Enregistrer les modifications"), type="primary", use_container_width=True)
-    if submitted:
-        if not new_name.strip():
-            st.error(tr("Donne un nom au projet."))
-            return
-        p["name"], p["desc"], p["due"] = new_name.strip(), new_desc.strip(), new_due.isoformat()
-        save()
-        st.toast("Projet mis à jour ✨")
-        st.rerun()
-    st.divider()
-    st.markdown("**" + tr("Ajouter un membre") + "**")
-    avail = [x["name"] for x in profiles() if x["id"] not in p["member_ids"]]
-    selected = st.selectbox(tr("Choisis un ami inscrit"), avail, index=None, key=f"edit_member_{pid}")
-    if st.button(tr("Ajouter"), key=f"edit_member_add_{pid}", disabled=not selected, use_container_width=True):
-        match = next((x for x in profiles() if x["name"] == selected), None)
-        if match and match["id"] not in p["member_ids"]:
-            p["members"].append(match["name"])
-            p["member_ids"].append(match["id"])
-            save()
-            st.rerun()
+# ---------- Tâches ----------
+def task_tile(p, t, suffix="", show_project=True, key_prefix="task"):
+    s = f"_{suffix}" if suffix else ""
+    status = c.task_status(t)
+    with st.container(key=f"{key_prefix}_{status}_{t['id']}{s}"):
+        a, b, m = st.columns([0.12, 1, 0.16], vertical_alignment="center")
+        with a:
+            c.task_checkbox(p, t, s)
+        proj = f'<span><i class="dotp" style="background:{tint(p["color"])[1]}"></i> {esc(p["name"])}</span>' if show_project else ""
+        by = f'<span>✓ {tr("fait par")} {esc(t["by"])}</span>' if t["done"] and t.get("by") else ""
+        b.markdown(f'<div class="tt{" done" if t["done"] else ""}">{c.star(t)}{esc(t["title"])}</div>'
+                   f'<div class="tm">{proj}{avatar(t["owner"])}<span>{esc(tr(t["owner"]))}</span>'
+                   f'<span>⏱ {c.format_duration(t.get("duration_minutes", 60))}</span>{pill(t["due"], t["done"])}{by}</div>',
+                   unsafe_allow_html=True)
+        with m.popover("⋯"):
+            c.task_menu(p, t, s)
 
 
-@st.dialog(tr("Modifier la tâche"))
-def edit_task(pid, tid):
-    p = get_project(pid)
-    t = next((x for x in p.get("tasks", []) if x["id"] == tid), None) if p else None
-    if not t:
-        return
-    st.caption("Ajuste les détails, la deadline et le temps nécessaire à cette tâche.")
-    st.markdown('<div class="dialog-intro">01 <span>·</span> Détails de la tâche</div>', unsafe_allow_html=True)
-    with st.form(f"edit_task_dialog_{tid}", border=False):
-        new_title = st.text_input(tr("Tâche"), value=t["title"])
-        c1, c2 = st.columns(2)
-        new_due = c1.date_input("Deadline", value=parse(t["due"]), format="DD/MM/YYYY")
-        new_owner = c2.selectbox(tr("Responsable"), ["Tout le monde"] + p["members"],
-                                 index=(["Tout le monde"] + p["members"]).index(t.get("owner", "Tout le monde")),
-                                 format_func=tr)
-        duration = st.select_slider(
-            tr("Durée estimée"), options=DURATION_OPTIONS,
-            value=max(15, min(480, int(t.get("duration_minutes", 60) or 60))),
-            key=f"edit_duration_{tid}", format_func=format_duration,
-        )
-        important = st.toggle("⭐ " + tr("Importante pour moi (rappels)"), value=is_important(t),
-                              key=f"edit_important_{tid}", help=tr(IMPORTANT_HELP))
-        submitted = st.form_submit_button(tr("Enregistrer les modifications"), type="primary", use_container_width=True)
-    if submitted:
-        if not new_title.strip():
-            st.error(tr("Donne un nom à la tâche."))
-            return
-        t.update({"title": new_title.strip(), "due": new_due.isoformat(),
-                  "owner": new_owner, "duration_minutes": int(duration)})
-        set_important(t, important)
-        save()
-        st.toast("Tâche mise à jour ✨")
-        st.rerun()
-    st.divider()
-    if st.button(tr("Supprimer la tâche"), key=f"delete_task_dialog_{tid}", use_container_width=True):
-        delete_task(pid, tid)
-        st.rerun()
+# ---------- Accueil (bento) ----------
+def home():
+    rows = c.workload_data()
+    summary = c.workload_summary(rows)
+    mine_all = c.my_open_tasks()
+    late = sum(1 for p, t in mine_all if c.task_status(t) == "late")
+    st.markdown(f'<div class="hello">{esc(tr("Bonjour {name}").format(name=c.me()["name"]))} <span>👋</span></div>'
+                f'<div class="hello-sub">{esc(c.fmt_long(date.today()).capitalize())} · {esc(tr(c.TAGLINE))}</div>', unsafe_allow_html=True)
+    if cal_row:
+        if st.button("📅 " + tr("Synchroniser Google Calendar"), key="calendar_sync_main"):
+            c.run_sync(tr("Calendrier synchronisé"))
+    elif not cal_err:
+        st.info("📅 " + tr("Google Calendar non connecté.") + " → " + tr("Compte"))
+    with st.container(key="bento"):
+        left, right = st.columns([1.55, 1])
+        with left, st.container(key="b_focus"):
+            st.markdown(f'<div class="h-tile">🎯 {tr("Ton focus")}<span>{len(mine_all)}</span></div>', unsafe_allow_html=True)
+            if not mine_all:
+                st.markdown(f'<div class="t-foot" style="padding:1rem 0">{tr("Rien pour toi ici. Profite 🌿")}</div>', unsafe_allow_html=True)
+            for p, t in mine_all[:10]:
+                task_tile(p, t, "focus", key_prefix="focus")
+            if len(mine_all) > 10:
+                st.caption(tr("+ {n} autres tâches").format(n=len(mine_all) - 10))
+        with right:
+            a, b = st.columns(2)
+            with a, st.container(key="b_today_peach"):
+                st.markdown(f'<div class="t-label">{tr(c.TODAY)}<span class="ic">☀️</span></div>'
+                            f'<div class="t-big">{c.format_duration(summary["today"]) if summary["today"] else "0 h"}</div>'
+                            f'<div class="t-foot">{c.pl(sum(1 for x in rows if x["date"] == date.today() and not x["done"]), "tâche", "tâches")}</div>',
+                            unsafe_allow_html=True)
+            with b, st.container(key="b_left_mint"):
+                st.markdown(f'<div class="t-label">{tr("Reste à faire")}<span class="ic">✅</span></div>'
+                            f'<div class="t-big">{c.open_count()}</div>'
+                            f'<div class="t-foot">{c.format_duration(summary["total"])} · {late} {tr("En retard").lower()}</div>',
+                            unsafe_allow_html=True)
+            today = date.today()
+            monday = today - timedelta(days=today.weekday())
+            week = [monday + timedelta(days=i) for i in range(7)]
+            loads = [c.day_load(rows, d)[0] for d in week]
+            peak = max(loads + [60])
+            bars = "".join(f'<div class="{"today" if d == today else ""}"><i style="height:{max(6, v / peak * 100):.0f}%"></i>'
+                           f'<small>{c.DAY_NAMES[c.lang()][i][0]}</small></div>' for i, (d, v) in enumerate(zip(week, loads)))
+            with st.container(key="b_week_lilac"):
+                st.markdown(f'<div class="t-label">{tr("Cette semaine")}<span class="ic">📈</span></div>'
+                            f'<div class="t-big">{c.format_duration(summary["week"]) if summary["week"] else "0 h"}</div>'
+                            f'<div class="spark">{bars}</div>', unsafe_allow_html=True)
+            with st.container(key="b_projects"):
+                projects = c.sorted_projects()
+                st.markdown(f'<div class="h-tile">📁 {tr("Tes projets")}<span>{len(projects)}</span></div>', unsafe_allow_html=True)
+                for p in projects[:5]:
+                    done, total = c.progress(p)
+                    with st.container(key=f"hit_h{p['id']}"):
+                        st.markdown(f'<div class="ring-mini">{ring(p, 46, 5)}<div><b>{esc(p["name"])}</b>'
+                                    f'<small>{tr("{done}/{total} tâches faites").format(done=done, total=total)}</small></div>'
+                                    f'<div style="margin-left:auto">{pill(p["due"], c.project_finished(p))}</div></div>', unsafe_allow_html=True)
+                        st.button(p["name"], key=f"home_go_{p['id']}", on_click=open_project, args=(p["id"],))
+                if not projects:
+                    st.caption(tr("L'avancement de chaque projet apparaîtra ici."))
+                st.button(tr("Voir tout") + " →", key="see_all", on_click=go, args=("projects",), use_container_width=True)
 
 
-@st.dialog(tr("Supprimer ce projet ?"))
-def confirm_delete(pid):
-    p = get_project(pid)
-    st.write(tr("« {name} » et ses {n} tâche(s) seront supprimés. Cette action est définitive.").format(name=p["name"], n=len(p["tasks"])))
-    c1, c2 = st.columns(2)
-    if c1.button(tr("Annuler"), use_container_width=True):
-        st.rerun()
-    if c2.button(tr("Oui, supprimer"), type="primary", use_container_width=True):
-        delete_project(pid)
-        st.rerun()
-
-
-# ---------- Vues ----------
-def banner():
-    projects = st.session_state.projects
-    n_open = sum(1 for p in projects for t in p["tasks"] if not t["done"])
-    st.markdown(
-        f"""<div class="banner"><h1>anti gooner</h1>
-<p>{tr("Les deadlines de l'équipe, au même endroit.")}</p>
-<span class="pill">{pl(len(projects), "projet", "projets")}</span>
-<span class="pill">{pl(n_open, "tâche à faire", "tâches à faire")}</span></div>""",
-        unsafe_allow_html=True,
-    )
-
-
-def card(p):
-    done, total = progress(p)
-    pct = int(done / total * 100) if total else 0
-    cnt = tr("{done}/{total} tâches").format(done=done, total=total)
-    with st.container(key=f"card_{p['id']}"):
-        st.markdown(
-            f"""<div class="pc-name"><span class="dot" style="background:{p['color']};color:{p['color']}"></span>{esc(p['name'])}</div>
-<div class="pc-desc">{esc(p['desc']) or '&nbsp;'}</div>
-<div class="pc-bar"><div style="width:{pct}%;background:{p['color']}"></div></div>
-<div class="pc-meta"><span>{cnt}</span>{due_badge(p['due'], total > 0 and done == total)}</div>""",
-            unsafe_allow_html=True,
-        )
-        st.button(
-            tr("Ouvrir"), key=f"open_{p['id']}", on_click=set_open, args=(p["id"],), use_container_width=True
-        )
-
-
+# ---------- Projets ----------
 def board():
-    projects = sorted(st.session_state.projects, key=lambda p: p["due"])
+    projects = c.sorted_projects()
+    st.markdown(f'<div class="h-page">{tr("Projets")}</div>'
+                f'<div class="sub">{c.pl(len(projects), "projet", "projets")} · {c.pl(c.open_count(), "tâche à faire", "tâches à faire")}</div>',
+                unsafe_allow_html=True)
     items = ["add"] + projects
-    with st.container(key="board"):
+    with st.container(key="grid"):
         for r in range(0, len(items), 3):
-            cols = st.columns(3, gap="medium")
-            for col, item in zip(cols, items[r : r + 3]):
+            cols = st.columns(3)
+            for col, p in zip(cols, items[r:r + 3]):
                 with col:
-                    if item == "add":
-                        if st.button(tr("+  Nouveau projet"), key="add_tile", use_container_width=True):
-                            new_project()
-                    else:
-                        card(item)
+                    if p == "add":
+                        if st.button("＋ " + tr("Nouveau projet"), key="add_tile", use_container_width=True):
+                            c.open_new_project()
+                        continue
+                    light, strong = tint(p["color"])
+                    done, total = c.progress(p)
+                    avs = "".join(avatar(m) for m in p["members"][:5])
+                    with st.container(key=f"hit_p{p['id']}"):
+                        st.markdown(
+                            f'<div class="pcard"><div class="pcard-top" style="background:linear-gradient(135deg,{light},{light} 40%,{strong}33)">'
+                            f'<div class="ringwrap">{ring(p, 60, 6)}</div></div><div class="pcard-body">'
+                            f'<div class="pcard-n">{esc(p["name"])}</div><div class="pcard-d">{esc(p.get("desc")) or "&nbsp;"}</div>'
+                            f'<div class="pcard-f"><div class="avs">{avs}</div>{pill(p["due"], c.project_finished(p))}</div>'
+                            f'<div class="t-foot" style="margin-top:.6rem">{tr("{done}/{total} tâches").format(done=done, total=total)}</div></div></div>',
+                            unsafe_allow_html=True)
+                        st.button(tr("Ouvrir") + " " + p["name"], key=f"open_{p['id']}", on_click=open_project, args=(p["id"],))
     if not projects:
-        st.markdown(
-            '<div class="empty">' + tr("Aucun projet pour l'instant. Clique sur le + pour créer le premier.") + "</div>",
-            unsafe_allow_html=True,
-        )
-    mine_all = sorted(
-        ((p, t) for p in projects for t in p["tasks"] if not t["done"] and t["owner"] in (me()["name"], "Tout le monde")),
-        key=lambda x: (x[1]["due"], x[0]["name"]),
-    )
-    mine = mine_all[:10]
-    if mine:
-        st.markdown(
-            '<div class="side-title" style="margin-top:2.2rem">' + tr("Mes tâches") + "</div>", unsafe_allow_html=True
-        )
-        for p, t in mine:
-            st.markdown(
-                f'<div class="mt-row"><span class="dot" style="background:{p["color"]};color:{p["color"]}"></span>'
-                f'<span class="t-title">{"⭐ " if is_important(t) else ""}{esc(t["title"])}</span><span class="owner">{esc(p["name"])}</span>'
-                f'{due_badge(t["due"])}</div>',
-                unsafe_allow_html=True,
-            )
-        if len(mine_all) > 10:
-            st.caption(tr("+ {n} autres tâches").format(n=len(mine_all) - 10))
-
-
-def make_ics(p):
-    def e(x):
-        return str(x).replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
-
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-
-    def event(uid_, day, summary, desc):
-        d = parse(day)
-        return [
-            "BEGIN:VEVENT", f"UID:{uid_}@anti-gooner", f"DTSTAMP:{stamp}",
-            f"DTSTART;VALUE=DATE:{d:%Y%m%d}", f"DTEND;VALUE=DATE:{d + timedelta(days=1):%Y%m%d}",
-            f"SUMMARY:{e(summary)}", f"DESCRIPTION:{e(desc)}", "END:VEVENT",
-        ]
-
-    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//anti gooner//FR", "CALSCALE:GREGORIAN"]
-    lines += event(f"project-{p['id']}", p["due"], f"{tr('Deadline du projet')} : {p['name']}", p["desc"])
-    for t in p["tasks"]:
-        if not t["done"]:
-            lines += event(
-                f"task-{t['id']}", t["due"], f"{p['name']} : {t['title']}",
-                f"{tr('Responsable')} : {tr(t['owner'])}",
-            )
-    lines.append("END:VCALENDAR")
-    return "\r\n".join(lines) + "\r\n"
-
-
-def task_status(t):
-    if t["done"]:
-        return "done"
-    n = (parse(t["due"]) - date.today()).days
-    return "late" if n < 0 else ("soon" if n <= 3 else "ok")
-
-
-def owner_chip(owner):
-    if owner == "Tout le monde":
-        letter, color = "👥", "#8E8FB5"
-    else:
-        letter = owner[:1].upper() or "?"
-        color = COLORS[sum(map(ord, owner)) % len(COLORS)]
-    return (
-        f'<span class="avatar" style="background:{color}22;color:{color};border:1px solid {color}55">'
-        f'{esc(letter)}</span><span class="owner">{esc(tr(owner))}</span>'
-    )
-
-
-
-def render_task_card(p, t, key_suffix=""):
-    """Rendu unique des cartes de tâches dans Projets et Workload."""
-    suffix = f"_{key_suffix}" if key_suffix else ""
-    locked = False
-    duration_label = format_duration(t.get("duration_minutes", 60))
-    with st.container(key=f"task_{task_status(t)}_{t['id']}{suffix}"):
-        c = st.columns([0.08, 1.5, 0.65, 0.6, 0.22], vertical_alignment="center")
-        c[0].checkbox(
-            tr("fait"), value=t["done"], key=f"chk_{t['id']}{suffix}", on_change=toggle,
-            args=(p["id"], t["id"]), label_visibility="collapsed", disabled=locked,
-        )
-        cls = "t-title done" if t["done"] else "t-title"
-        by = f'<div class="by">{tr("fait par")} {esc(t["by"])}</div>' if t["done"] and t.get("by") else ""
-        c[1].markdown(
-            f'<div class="{cls}">{"⭐ " if is_important(t) else ""}{esc(t["title"])}</div>'
-            f'<div class="by">⏱ {duration_label}</div>{by}', unsafe_allow_html=True
-        )
-        c[2].markdown(owner_chip(t["owner"]), unsafe_allow_html=True)
-        c[3].markdown(
-            f'{due_badge(t["due"], t["done"])}<span class="date-small">{parse(t["due"]):%d/%m}</span>',
-            unsafe_allow_html=True,
-        )
-        with c[4].popover(":material/more_horiz:"):
-            st.caption(f"⏱ {duration_label}")
-            st.button("☆ " + tr("Retirer des importantes") if is_important(t) else "⭐ " + tr("Marquer importante"),
-                      key=f"imp_{t['id']}{suffix}", on_click=toggle_important, args=(p["id"], t["id"]),
-                      use_container_width=True)
-            if st.button("Modifier", key=f"edit_task_btn_{t['id']}{suffix}", use_container_width=True):
-                edit_task(p["id"], t["id"])
-            st.divider()
-            st.button(
-                tr("Supprimer la tâche"), key=f"rm_{t['id']}{suffix}", on_click=delete_task,
-                args=(p["id"], t["id"]), use_container_width=True,
-            )
+        st.markdown(f'<div class="empty">{tr(c.NO_PROJECT)}</div>', unsafe_allow_html=True)
 
 
 def project_view(p):
-    st.button(tr("←  Retour au board"), key="back", on_click=set_open, args=(None,))
-    done, total = progress(p)
-    pct = int(done / total * 100) if total else 0
-    chips = "".join(f'<span class="chip">{esc(m)}</span>' for m in p["members"])
-    meta = tr("{done}/{total} tâches, deadline le {d}").format(done=done, total=total, d=f"{parse(p['due']):%d/%m/%Y}")
-    with st.container(key="ph"):
+    light, strong = tint(p["color"])
+    done, total = c.progress(p)
+    with st.container(key="back"):
+        st.button("← " + tr("Projets"), on_click=c.set_open, args=(None,))
+    avs = "".join(avatar(m) for m in p["members"])
+    st.markdown(f'<style>.st-key-phero {{ background:linear-gradient(135deg, {light}, #fff 70%); }}</style>', unsafe_allow_html=True)
+    with st.container(key="phero"):
         st.markdown(
-            f"""<div class="ph-title"><span class="dot" style="background:{p['color']};color:{p['color']}"></span>{esc(p['name'])}</div>
-<div class="ph-desc">{esc(p['desc'])}</div>
-<div class="pc-bar"><div style="width:{pct}%;background:{p['color']}"></div></div>
-<div class="pc-meta"><span>{meta}</span>{due_badge(p['due'], total > 0 and done == total)}</div>
-{chips}""",
-            unsafe_allow_html=True,
-        )
-
-    c1, c2, c3, c4 = st.columns([1.2, 1.2, 1, 2], vertical_alignment="center")
-    if c1.button(tr("+  Nouvelle tâche"), type="primary", key="add_task", use_container_width=True):
-        new_task(p["id"])
-    if c2.button(tr("Gérer le projet"), key=f"manage_project_{p['id']}", use_container_width=True):
-        edit_project(p["id"])
-    if p.get("owner_id") == me()["id"] and c3.button(tr("Supprimer"), key="del_project", use_container_width=True):
-        confirm_delete(p["id"])
-    c4.download_button(
-        tr("Ajouter à mon calendrier (.ics)"),
-        data=make_ics(p),
-        file_name=f"{''.join(ch if ch.isalnum() else '_' for ch in p['name'])}.ics",
-        mime="text/calendar",
-        on_click="ignore",
-        use_container_width=True,
-        help=tr("Télécharge un fichier à ouvrir avec Google Agenda, Apple Calendrier ou Outlook : la deadline du projet et ses tâches non terminées y sont ajoutées."),
-    )
-
-    locked = False
-
+            f'<div class="ph">{ring(p, 104, 9)}<div><div class="ph-n">{esc(p["name"])}</div>'
+            + (f'<div class="ph-d">{esc(p["desc"])}</div>' if p.get("desc") else '<div style="height:.6rem"></div>')
+            + f'<div class="ph-m">{pill(p["due"], c.project_finished(p))}<span>📅 {c.parse(p["due"]):%d/%m/%Y}</span>'
+            f'<span>✅ {tr("{done}/{total} tâches").format(done=done, total=total)}</span>'
+            f'<span class="avs">{avs}</span><span>{", ".join(esc(m) for m in p["members"])}</span></div></div></div>',
+            unsafe_allow_html=True)
+        a1, a2, a3, a4 = st.columns([1.2, 1.2, 1, 1.9])
+        if a1.button("＋ " + tr("Nouvelle tâche"), type="primary", key="add_task", use_container_width=True):
+            c.open_new_task(p["id"])
+        if a2.button("✏️ " + tr("Gérer le projet"), key=f"manage_{p['id']}", use_container_width=True):
+            c.open_edit_project(p["id"])
+        if c.is_owner(p) and a3.button("🗑 " + tr("Supprimer"), key="del_project", use_container_width=True):
+            c.open_confirm_delete(p["id"])
+        with a4:
+            c.ics_button(p, "📆 " + tr("Ajouter à mon calendrier (.ics)"))
     st.write("")
-    tasks = sorted(p["tasks"], key=lambda t: (t["done"], t["due"]))
-    if not tasks:
-        st.markdown(
-            '<div class="empty">' + tr("Pas encore de tâche. Ajoute la première avec sa deadline.") + "</div>",
-            unsafe_allow_html=True,
-        )
-    last_grp = None
-    for t in tasks:
-        grp = "done" if t["done"] else "todo"
-        if grp != last_grp:
-            last_grp = grp
-            label, count = (tr("Terminées"), done) if t["done"] else (tr("À faire"), total - done)
-            st.markdown(f'<div class="sec">{label}<span>{count}</span></div>', unsafe_allow_html=True)
-        render_task_card(p, t)
+    if not p["tasks"]:
+        st.markdown(f'<div class="empty">{tr("Pas encore de tâche. Ajoute la première avec sa deadline.")}</div>', unsafe_allow_html=True)
+        return
+    todo = sorted((t for t in p["tasks"] if not t["done"]), key=lambda t: t["due"])
+    fin = sorted((t for t in p["tasks"] if t["done"]), key=lambda t: t["due"])
+    with st.container(key="cols"):
+        l, r = st.columns([1.35, 1])
+        with l, st.container(key="b_todo"):
+            st.markdown(f'<div class="colh">📝 {tr("À faire")}<span>{len(todo)}</span></div>', unsafe_allow_html=True)
+            for t in todo:
+                task_tile(p, t, show_project=False)
+            if not todo:
+                st.markdown(f'<div class="t-foot">{tr("Tout est à jour.")} 🎉</div>', unsafe_allow_html=True)
+        with r, st.container(key="b_done_mint"):
+            st.markdown(f'<div class="colh">🎉 {tr("Terminées")}<span>{len(fin)}</span></div>', unsafe_allow_html=True)
+            for t in fin:
+                task_tile(p, t, show_project=False)
 
 
-def ring(p, active):
-    done, total = progress(p)
-    pct = round(done / total * 100) if total else 0
-    sub = tr("{done}/{total} tâches faites").format(done=done, total=total)
-    fg = (
-        f'<circle class="ring-fg" cx="18" cy="18" r="15.9155" fill="none" stroke="{p["color"]}" '
-        f'stroke-width="3.4" stroke-linecap="round" stroke-dasharray="{pct} {100 - pct}" '
-        f'transform="rotate(-90 18 18)"/>'
-        if pct
-        else ""
-    )
-    return (
-        f'<div class="ring-row{" active" if active else ""}">'
-        f'<svg width="68" height="68" viewBox="0 0 36 36">'
-        f'<circle cx="18" cy="18" r="15.9155" fill="none" stroke="rgba(255,255,255,.09)" stroke-width="3.4"/>'
-        f'{fg}'
-        f'<text x="18" y="20.6" text-anchor="middle" font-size="8" font-weight="700" fill="#ECEBFF">{pct}%</text>'
-        f'</svg>'
-        f'<div><div class="ring-name">{esc(p["name"])}</div>'
-        f'<div class="ring-sub">{sub}</div></div></div>'
-    )
+# ---------- Planning ----------
+def item_tile(item, suffix):
+    p, t = c.find_task(item)
+    if t:
+        task_tile(p, t, suffix)
 
 
-def sidebar(calendar_connection_row, calendar_error):
-    with st.sidebar:
-        st.markdown('<div class="side-title">' + tr("Avancement") + "</div>", unsafe_allow_html=True)
-        projects = sorted(st.session_state.projects, key=lambda p: p["due"])
-        if not projects:
-            st.caption(tr("L'avancement de chaque projet apparaîtra ici."))
-        for p in projects:
-            with st.container(key=f"navc_{p['id']}"):
-                st.markdown(ring(p, p["id"] == st.session_state.open), unsafe_allow_html=True)
-                st.button(p["name"], key=f"go_{p['id']}", on_click=set_open, args=(p["id"],), use_container_width=True)
-        st.markdown(
-            '<div class="side-title" style="font-size:1.05rem;margin-top:1.8rem">' + tr("Sauvegarde") + "</div>",
-            unsafe_allow_html=True,
-        )
-        st.download_button(
-            tr("Exporter les données"),
-            data=json.dumps(st.session_state.projects, ensure_ascii=False, indent=2),
-            file_name=f"anti_gooner_{date.today():%Y-%m-%d}.json",
-            mime="application/json",
-            on_click="ignore",
-            use_container_width=True,
-        )
-        st.markdown('<div class="account-status">● &nbsp;' + html.escape(tr("Connecté : {name}").format(name=me()["name"])) + '</div>', unsafe_allow_html=True)
-        st.markdown('<div class="side-title" style="font-size:1.05rem;margin-top:1.4rem">Google Calendar</div>', unsafe_allow_html=True)
-
-        if calendar_error:
-            st.error(f"Lecture de google_calendar_connections impossible : {calendar_error}")
-        elif calendar_connection_row:
-            st.caption(f"Compte : {calendar_connection_row.get('connected_email') or 'Google'}")
-            if st.button("Synchroniser maintenant", key="calendar_sync", use_container_width=True):
-                run_sync()
-            if st.button("Déconnecter Calendar", key="calendar_disconnect", use_container_width=True):
-                st.session_state["calendar_disconnect_confirm"] = True
-            if st.session_state.get("calendar_disconnect_confirm"):
-                st.warning("La déconnexion arrête la synchronisation. Les événements existants resteront dans Google Calendar.")
-                if st.button("Confirmer la déconnexion", key="calendar_disconnect_yes", use_container_width=True):
-                    rest("DELETE", "google_calendar_connections", params={"user_id": f"eq.{me()['id']}"})
-                    rest("DELETE", "google_calendar_events", params={"user_id": f"eq.{me()['id']}"})
-                    st.session_state.pop("calendar_disconnect_confirm", None)
-                    st.rerun()
+def planning():
+    rows = c.workload_data()
+    summary = c.workload_summary(rows)
+    st.markdown(f'<div class="h-page">{tr("Charge de travail")}</div><div class="sub">{tr("Charge basée sur les deadlines")}</div>',
+                unsafe_allow_html=True)
+    with st.container(key="bento"):
+        k = st.columns(3)
+        for col, (label, val, ic, tone) in zip(k, [("Heures restantes", summary["total"], "⏳", "lilac"),
+                                                   (c.TODAY, summary["today"], "☀️", "peach"),
+                                                   ("Cette semaine", summary["week"], "📈", "mint")]):
+            with col, st.container(key=f"b_k{tone}_{tone}"):
+                st.markdown(f'<div class="t-label">{tr(label)}<span class="ic">{ic}</span></div>'
+                            f'<div class="t-big">{c.format_duration(val) if val else "0 h"}</div>', unsafe_allow_html=True)
+    st.write("")
+    view, start, end, days, sel_key = c.workload_period()
+    with st.container(key="b_cal"):
+        with st.container(key="seg"):
+            s1, s2, _, prev, lab, nxt = st.columns([1, 1, 0.3, 0.5, 2.6, 0.5])
+            s1.button(tr("Semaine"), key="pw", on_click=c.set_period, args=("Semaine",), use_container_width=True,
+                      type="primary" if view == "Semaine" else "secondary")
+            s2.button(tr("Mois"), key="pm", on_click=c.set_period, args=("Mois",), use_container_width=True,
+                      type="primary" if view == "Mois" else "secondary")
+            prev.button("‹", key="pprev", on_click=c.shift_period, args=(-1,), use_container_width=True,
+                        help=tr("Semaine précédente" if view == "Semaine" else "Mois précédent"))
+            lab.markdown(f'<div class="period">{esc(c.period_label(view, start, end))}</div>', unsafe_allow_html=True)
+            nxt.button("›", key="pnext", on_click=c.shift_period, args=(1,), use_container_width=True,
+                       help=tr("Semaine suivante" if view == "Semaine" else "Mois suivant"))
+        period = [x for x in rows if start <= x["date"] <= end]
+        o = sum(x["minutes"] for x in period if not x["done"])
+        d = sum(x["minutes"] for x in period if x["done"])
+        st.markdown(f'<div class="legend"><span><i style="background:var(--violet)"></i>{tr("Ouvertes")} <b>{c.format_duration(o) if o else "0 h"}</b></span>'
+                    f'<span><i style="background:#7BD8B3"></i>{tr("Terminées")} <b>{c.format_duration(d) if d else "0 h"}</b></span></div>',
+                    unsafe_allow_html=True)
+        selected = st.session_state[sel_key]
+        today = date.today()
+        names = c.DAY_NAMES[c.lang()]
+        if view == "Semaine":
+            peak = max([sum(c.day_load(rows, day)) for day in days] + [60])
+            with st.container(key="week"):
+                cols = st.columns(7)
+                for i, (col, day) in enumerate(zip(cols, days)):
+                    op, fi = c.day_load(rows, day)
+                    with col:
+                        st.markdown(f'<div class="wk{" sel" if day == selected else ""}{" today" if day == today else ""}">'
+                                    f'<div class="t">{c.format_duration(op + fi) if op + fi else "–"}</div>'
+                                    f'<div class="bar"><div class="d" style="height:{fi / peak * 100:.0f}%"></div>'
+                                    f'<div class="o" style="height:{op / peak * 100:.0f}%"></div></div>'
+                                    f'<div class="dt">{day:%d/%m}</div></div>', unsafe_allow_html=True)
+                        st.button(names[i], key=f"wd_{day.isoformat()}", on_click=c.select_day, args=(sel_key, day),
+                                  use_container_width=True, type="primary" if day == selected else "secondary")
         else:
-            if st.button("Connecter Google Calendar", key="calendar_connect", use_container_width=True):
-                try:
-                    start_calendar_oauth()
-                    st.rerun()
-                except Exception as exc:
-                    st.error(f"Impossible de démarrer Google Calendar : {exc}")
-            auth_url = st.session_state.get("calendar_auth_url")
-            if auth_url:
-                # target="_top" : ouvre Google dans le même onglet (st.link_button ouvre un nouvel onglet)
-                components.html(
-                    f'''<a href="{html.escape(auth_url, quote=True)}" target="_top"
-                    style="display:block;text-align:center;padding:.5rem;border-radius:12px;
-                    background:linear-gradient(135deg,#8B7BFF,#6A58F0);color:#fff;
-                    font-family:sans-serif;font-weight:600;text-decoration:none">Continuer vers Google</a>''',
-                    height=50,
-                )
+            with st.container(key="month"):
+                head = st.columns(7)
+                for col, n in zip(head, names):
+                    col.markdown(f'<div class="mh">{n}</div>', unsafe_allow_html=True)
+                for w in range(0, len(days), 7):
+                    cols = st.columns(7)
+                    for col, day in zip(cols, days[w:w + 7]):
+                        n_open = sum(1 for x in rows if x["date"] == day and not x["done"])
+                        n_done = sum(1 for x in rows if x["date"] == day and x["done"])
+                        op, fi = c.day_load(rows, day)
+                        dots = "".join('<i></i>' for _ in range(min(n_open, 4))) + "".join('<i class="d"></i>' for _ in range(min(n_done, 3)))
+                        with col, st.container(key=f"hit_m{day.isoformat()}"):
+                            st.markdown(f'<div class="mc{" out" if day.month != start.month else ""}{" sel" if day == selected else ""}'
+                                        f'{" today" if day == today else ""}"><b>{day.day}</b>'
+                                        f'<span>{c.format_duration(op + fi) if op + fi else ""}</span><div class="dots">{dots}</div></div>',
+                                        unsafe_allow_html=True)
+                            st.button(f"{day:%d/%m}", key=f"md_{day.isoformat()}", on_click=c.select_day, args=(sel_key, day))
+    st.write("")
+    sel_rows = sorted((x for x in rows if x["date"] == selected), key=lambda x: (x["done"], x["project"], x["title"]))
+    upcoming = sorted((x for x in rows if not x["done"] and x["date"] >= today), key=lambda x: (x["date"], x["project"]))
+    completed = sorted((x for x in rows if x["done"]), key=lambda x: (x["date"], x["project"]))
+    with st.container(key="cols"):
+        l, r = st.columns([1, 1])
+        with l:
+            with st.container(key="b_sel"):
+                st.markdown(f'<div class="colh">📍 {esc(c.fmt_long(selected).capitalize())}<span>{len(sel_rows)}</span></div>', unsafe_allow_html=True)
+                for item in sel_rows:
+                    item_tile(item, f"sel_{view}")
+                if not sel_rows:
+                    st.markdown(f'<div class="t-foot">{tr("Aucune tâche avec une échéance ce jour-là.")}</div>', unsafe_allow_html=True)
+            st.write("")
+            with st.container(key="b_completed_mint"):
+                st.markdown(f'<div class="colh">🎉 {tr("Tâches terminées")}<span>{len(completed)}</span></div>', unsafe_allow_html=True)
+                for item in completed[:30]:
+                    item_tile(item, "done")
+                if not completed:
+                    st.markdown(f'<div class="t-foot">{tr("Aucune tâche terminée pour le moment.")}</div>', unsafe_allow_html=True)
+        with r, st.container(key="b_upcoming"):
+            st.markdown(f'<div class="colh">🚀 {tr("Tâches ouvertes")}<span>{len(upcoming)}</span></div>', unsafe_allow_html=True)
+            for item in upcoming[:30]:
+                item_tile(item, "up")
+            if not upcoming:
+                st.markdown(f'<div class="t-foot">{tr("Aucune tâche ouverte à venir.")}</div>', unsafe_allow_html=True)
 
-        st.button("Se déconnecter", key="logout", on_click=st.logout, use_container_width=True)
+
+# ---------- Compte ----------
+def account():
+    st.markdown(f'<div class="h-page">{tr("Compte")}</div><div class="sub">{tr("Réglages")} · Google Calendar · {tr("Sauvegarde")}</div>',
+                unsafe_allow_html=True)
+    with st.container(key="bento"):
+        a, b, d = st.columns(3)
+        with a, st.container(key="b_acc"):
+            st.markdown(f'<div class="acc"><div class="avatar-me">{esc(c.me()["name"][:1].upper())}</div>'
+                        f'<div><b>{esc(c.me()["name"])}</b><small>● {esc(tr("Connecté : {name}").format(name=c.me()["name"]))}</small></div></div>',
+                        unsafe_allow_html=True)
+            st.write("")
+            st.button("👋 " + tr("Se déconnecter"), key="logout", on_click=st.logout, use_container_width=True)
+        with b, st.container(key="b_gcal_lilac"):
+            st.markdown('<div class="h-tile">📅 Google Calendar</div>', unsafe_allow_html=True)
+            c.calendar_panel(cal_row, cal_err, link_style=(
+                "display:block;text-align:center;padding:.65rem;border-radius:999px;"
+                "background:linear-gradient(120deg,#FF7A59,#C04CFD 55%,#6C4DFF);color:#fff;"
+                "font-family:sans-serif;font-weight:700;text-decoration:none"))
+        with d, st.container(key="b_backup_butter"):
+            st.markdown(f'<div class="h-tile">💾 {tr("Sauvegarde")}</div>'
+                        f'<div class="t-foot" style="margin-bottom:.6rem">JSON · {c.pl(len(st.session_state.projects), "projet", "projets")}</div>',
+                        unsafe_allow_html=True)
+            c.export_button("⬇️ " + tr("Exporter les données"))
 
 
-# ---------- Main ----------
-st.markdown(CSS, unsafe_allow_html=True)
-_, _lang_col = st.columns([5, 1])
-with _lang_col:
-    st.radio("Langue / Language", ["FR", "EN"], horizontal=True, key="lang", label_visibility="collapsed")
-auth_gate()
-try:
-    handle_calendar_callback()
-except Exception as exc:
-    st.session_state.pop("calendar_auth_url", None)
-    st.query_params.clear()
-    st.error(f"Erreur Google Calendar : {type(exc).__name__}: {exc}")
-notice = st.session_state.pop("calendar_notice", None)
-if notice:
-    st.success(notice)
-notice_err = st.session_state.pop("calendar_notice_err", None)
-if notice_err:
-    st.error(notice_err)
-if "open" not in st.session_state:
-    st.session_state.open = None
-try:
-    # Rechargé à chaque action : chacun voit les changements des autres
-    st.session_state.projects = load()
-except Exception:
-    st.error(tr("Impossible de joindre la base de données (projet Supabase en pause, ou URL / clé incorrectes). Tes données ne sont pas perdues."))
-    st.stop()
-
-# État de la connexion Google Calendar (lu une seule fois par exécution)
-try:
-    _cal_row = calendar_connection()
-    _cal_err = None
-except Exception as exc:
-    _cal_row, _cal_err = None, f"{type(exc).__name__}: {exc}"
-
-sidebar(_cal_row, _cal_err)
-banner()
-important_banner()
-
-# Bloc toujours visible, même si la barre latérale est repliée.
-if _cal_err:
-    st.error(f"Lecture de google_calendar_connections impossible : {_cal_err}")
-elif _cal_row:
-    if st.button("📅 Synchroniser Google Calendar", key="calendar_sync_main"):
-        run_sync("Calendrier synchronisé")
-else:
-    st.info("Google Calendar non connecté : utilise le bouton « Connecter Google Calendar » dans la barre latérale.")
-
-if "main_navigation" not in st.session_state:
-    st.session_state.main_navigation = tr("Projets")
-nav_left, nav_right = st.columns(2, gap="medium")
-with nav_left:
-    if st.button(
-        "▦  " + tr("Projets"), key="nav_projects_main", use_container_width=True,
-        type="primary" if st.session_state.main_navigation == tr("Projets") else "secondary",
-    ):
-        st.session_state.main_navigation = tr("Projets")
-        st.rerun()
-with nav_right:
-    if st.button(
-        "▥  " + tr("Charge de travail"), key="nav_workload_main", use_container_width=True,
-        type="primary" if st.session_state.main_navigation == tr("Charge de travail") else "secondary",
-    ):
-        st.session_state.main_navigation = tr("Charge de travail")
-        st.rerun()
-page = st.session_state.main_navigation
-if page == tr("Charge de travail"):
-    workload_view()
-else:
-    current = get_project(st.session_state.open) if st.session_state.open else None
+# ---------- Rendu ----------
+topbar()
+c.important_banner()
+page = st.session_state.page
+if page == "planning":
+    planning()
+elif page == "account":
+    account()
+elif page == "projects":
+    current = c.get_project(st.session_state.open) if st.session_state.open else None
     if current:
         project_view(current)
     else:
         board()
-# Contraste des textes des cartes projets et de la navigation latérale.
-CSS += r"""
-<style>
-/* Cartes projets : tous les textes informatifs en blanc. */
-.st-key-board [class*="st-key-card_"] .pc-name,
-.st-key-board [class*="st-key-card_"] .pc-name *,
-.st-key-board [class*="st-key-card_"] .pc-desc,
-.st-key-board [class*="st-key-card_"] .pc-meta,
-.st-key-board [class*="st-key-card_"] .pc-meta > span {
-  color: #FFFFFF !important;
-}
-.st-key-board [class*="st-key-card_"] .badge,
-.st-key-board [class*="st-key-card_"] .badge * {
-  color: #FFFFFF !important;
-}
-/* Sidebar : nom, progression et détails des projets en blanc. */
-[data-testid="stSidebar"] .ring-name,
-[data-testid="stSidebar"] .ring-sub,
-[data-testid="stSidebar"] .ring-row .ring-name *,
-[data-testid="stSidebar"] .ring-row .ring-sub *,
-[data-testid="stSidebar"] .ring-row svg text {
-  color: #FFFFFF !important;
-  fill: #FFFFFF !important;
-}
-</style>
-"""
+else:
+    home()
